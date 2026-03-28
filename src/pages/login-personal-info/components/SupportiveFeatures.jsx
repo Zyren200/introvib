@@ -4,31 +4,31 @@ import Icon from '../../../components/AppIcon';
 const SupportiveFeatures = () => {
   const features = [
     {
+      icon: 'ClipboardList',
+      title: '5-Question Personality Test',
+      description: 'A short assessment confirms whether you are introvert, ambivert, or extrovert.'
+    },
+    {
+      icon: 'HeartPulse',
+      title: 'Healthy Tips',
+      description: 'Get recommendations based on how you recharge, connect, and keep balance.'
+    },
+    {
       icon: 'Users',
-      title: 'Connect Gently',
-      description: 'Find peers with shared interests at your own pace'
+      title: 'Personality-Based Matching',
+      description: 'Meet people who share your interests and your social energy style.'
     },
     {
-      icon: 'MessageCircle',
-      title: 'Low-Pressure Messaging',
-      description: 'Reply when you\'re ready with supportive prompts'
-    },
-    {
-      icon: 'Moon',
-      title: 'Quiet Mode',
-      description: 'Set quiet hours and check messages when comfortable'
-    },
-    {
-      icon: 'BookOpen',
-      title: 'Self-Paced Learning',
-      description: 'Adaptive tools that match your learning style'
+      icon: 'Grid3X3',
+      title: 'Sudoku for Introverts',
+      description: 'Introverts unlock matching and chat by completing a calm puzzle challenge.'
     }
   ];
 
   return (
     <div className="mt-12">
       <h2 className="text-xl md:text-2xl lg:text-3xl font-heading font-semibold text-foreground text-center mb-8">
-        Designed for Thoughtful Learners
+        Built for a Social Flow That Feels Personal
       </h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
         {features?.map((feature, index) => (

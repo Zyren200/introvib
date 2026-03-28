@@ -66,8 +66,8 @@ const MessageComposer = ({
   }, [initialMessage, onInitialMessageApplied]);
 
   return (
-    <div className="bg-card rounded-xl border border-border p-4 md:p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="border-t border-border bg-card/95 p-4 md:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center space-x-2">
           <Icon name="MessageCircle" size={20} color="var(--color-primary)" />
           <span className="font-body font-medium text-foreground">
@@ -76,17 +76,17 @@ const MessageComposer = ({
         </div>
         <button
           onClick={() => setShowPrompts(!showPrompts)}
-          className="flex items-center space-x-2 px-3 py-1.5 rounded-lg hover:bg-muted transition-gentle caption text-muted-foreground"
+          className="inline-flex items-center space-x-2 rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-gentle hover:bg-muted"
         >
           <Icon name="Lightbulb" size={16} color="currentColor" />
           <span className="hidden sm:inline">Ice breakers</span>
         </button>
       </div>
       {showPrompts && (
-        <div className="mb-4 p-4 bg-accent/5 rounded-lg border border-accent/20">
-          <div className="flex items-center space-x-2 mb-3">
+        <div className="mb-4 rounded-2xl border border-accent/20 bg-accent/5 p-4">
+          <div className="mb-3 flex items-center space-x-2">
             <Icon name="Sparkles" size={16} color="var(--color-accent)" />
-            <span className="caption text-accent font-medium">
+            <span className="caption font-medium text-accent">
               Optional conversation starters
             </span>
           </div>
@@ -95,7 +95,7 @@ const MessageComposer = ({
               <button
                 key={index}
                 onClick={() => usePrompt(prompt)}
-                className="w-full text-left p-3 rounded-lg bg-card hover:bg-muted transition-gentle text-sm text-foreground"
+                className="w-full rounded-xl bg-card p-3 text-left text-sm text-foreground transition-gentle hover:bg-muted"
               >
                 {prompt}
               </button>
@@ -109,65 +109,82 @@ const MessageComposer = ({
           </button>
         </div>
       )}
-      <div className="mb-4">
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e?.target?.value)}
-          placeholder="Type your message here... Take your time, there's no rush."
-          className="w-full min-h-32 md:min-h-40 p-4 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 transition-gentle resize-none"
-          aria-label="Message content"
-          disabled={disabled}
-        />
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center gap-3">
-            <label className="flex items-center space-x-2 cursor-pointer text-sm text-primary">
-              <Icon name="Image" size={16} color="currentColor" />
-              <span>Attach image</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={disabled} />
-            </label>
-            {imageData && (
-              <span className="caption text-muted-foreground">1 image attached</span>
-            )}
+      {imageData && (
+        <div className="mb-3 flex items-center gap-3 rounded-2xl border border-border bg-background px-3 py-2">
+          <img
+            src={imageData}
+            alt="Pending attachment"
+            className="h-14 w-14 rounded-xl object-cover"
+          />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-foreground">Image ready to send</p>
+            <p className="text-xs text-muted-foreground">You can still add text before sending.</p>
           </div>
-          <span className="caption text-muted-foreground italic">
-            Respond when you're ready
-          </span>
+          <button
+            type="button"
+            onClick={() => setImageData(null)}
+            className="rounded-full p-2 text-muted-foreground transition-gentle hover:bg-muted hover:text-foreground"
+            disabled={disabled}
+          >
+            <Icon name="X" size={16} color="currentColor" />
+          </button>
         </div>
-      </div>
-      <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
+      )}
+      <div className="flex items-end gap-3">
+        <label className="flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-primary transition-gentle hover:bg-muted">
+          <Icon name="Image" size={18} color="currentColor" />
+          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={disabled} />
+        </label>
+        <div className="flex-1 rounded-[1.75rem] border border-border bg-background px-4 py-3 shadow-inner">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e?.target?.value)}
+            placeholder="Type a message..."
+            className="w-full min-h-[52px] max-h-32 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            aria-label="Message content"
+            disabled={disabled}
+          />
+        </div>
         <Button
           variant="default"
+          size="icon"
           iconName="Send"
-          iconPosition="right"
           onClick={handleSend}
           disabled={disabled || (!message?.trim() && !imageData)}
-          className="flex-1"
-        >
-          Send message
-        </Button>
-        <Button
-          variant="outline"
-          iconName="Save"
-          iconPosition="left"
-          onClick={handleSaveDraft}
-          disabled={disabled || (!message?.trim() && !imageData)}
-        >
-          Save draft
-        </Button>
-        <Button
-          variant="ghost"
-          iconName="Clock"
-          iconPosition="left"
-          onClick={handleReplyLater}
-          disabled={disabled}
-        >
-          Reply later
-        </Button>
+          className="h-12 w-12 rounded-full"
+        />
       </div>
-      <div className="mt-4 p-3 bg-success/5 rounded-lg border border-success/20">
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            iconName="Save"
+            iconPosition="left"
+            onClick={handleSaveDraft}
+            disabled={disabled || (!message?.trim() && !imageData)}
+          >
+            Save draft
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconName="Clock"
+            iconPosition="left"
+            onClick={handleReplyLater}
+            disabled={disabled}
+          >
+            Reply later
+          </Button>
+        </div>
+        <span className="text-xs italic text-muted-foreground">
+          Respond when you're ready
+        </span>
+      </div>
+      <div className="mt-4 rounded-2xl border border-success/20 bg-success/5 p-3">
         <div className="flex items-start space-x-2">
           <Icon name="Info" size={16} color="var(--color-success)" className="flex-shrink-0 mt-0.5" />
-          <p className="caption text-success leading-relaxed">
+          <p className="caption leading-relaxed text-success">
             Your messages are saved automatically. You can come back anytime to continue the conversation.
           </p>
         </div>

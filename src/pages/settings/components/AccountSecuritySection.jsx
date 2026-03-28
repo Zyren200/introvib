@@ -4,7 +4,13 @@ import Input from '../../../components/ui/Input';
 import Button from '../../../components/ui/Button';
 import { Checkbox } from '../../../components/ui/Checkbox';
 
-const AccountSecuritySection = ({ settings, accountEmail, onUpdate, onDeleteAccount }) => {
+const AccountSecuritySection = ({
+  settings,
+  accountEmail,
+  onUpdate,
+  onDeleteAccount,
+  isDeletingAccount = false,
+}) => {
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [passwordData, setPasswordData] = useState({
     current: '',
@@ -31,10 +37,10 @@ const AccountSecuritySection = ({ settings, accountEmail, onUpdate, onDeleteAcco
     alert('Data export request received. You will receive an email with your data within 24 hours.');
   };
 
-  const handleDeleteAccount = () => {
+  const handleDeleteAccount = async () => {
     setShowDeleteConfirm(false);
     const result = onDeleteAccount
-      ? onDeleteAccount()
+      ? await onDeleteAccount()
       : { success: false, error: 'Delete account is currently unavailable.' };
 
     if (!result?.success) {
@@ -166,6 +172,7 @@ const AccountSecuritySection = ({ settings, accountEmail, onUpdate, onDeleteAcco
                   variant="danger"
                   size="sm"
                   onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isDeletingAccount}
                 >
                   Delete Account
                 </Button>
@@ -179,6 +186,7 @@ const AccountSecuritySection = ({ settings, accountEmail, onUpdate, onDeleteAcco
                       variant="danger"
                       size="sm"
                       onClick={handleDeleteAccount}
+                      loading={isDeletingAccount}
                     >
                       Yes, Delete My Account
                     </Button>
@@ -186,6 +194,7 @@ const AccountSecuritySection = ({ settings, accountEmail, onUpdate, onDeleteAcco
                       variant="outline"
                       size="sm"
                       onClick={() => setShowDeleteConfirm(false)}
+                      disabled={isDeletingAccount}
                     >
                       Cancel
                     </Button>

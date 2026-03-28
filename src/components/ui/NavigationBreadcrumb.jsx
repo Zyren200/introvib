@@ -7,14 +7,26 @@ const NavigationBreadcrumb = () => {
 
   const breadcrumbMap = {
     '/personalized-dashboard': [
-      { label: 'Your Dashboard', path: '/personalized-dashboard' }
+      { label: 'Home', path: '/personalized-dashboard' }
+    ],
+    '/adaptive-quiz': [
+      { label: 'Home', path: '/personalized-dashboard' },
+      { label: 'Personality Test', path: '/adaptive-quiz' }
+    ],
+    '/sudoku-puzzle': [
+      { label: 'Home', path: '/personalized-dashboard' },
+      { label: 'Sudoku', path: '/sudoku-puzzle' }
     ],
     '/find-matches-conversations': [
-      { label: 'Your Dashboard', path: '/personalized-dashboard' },
-      { label: 'Connect Gently', path: '/find-matches-conversations' }
+      { label: 'Home', path: '/personalized-dashboard' },
+      { label: 'Matches & Chat', path: '/find-matches-conversations' }
     ],
     '/login-personal-info': [
-      { label: 'Your Quiet Space', path: '/login-personal-info' }
+      { label: 'IntroVibe', path: '/login-personal-info' }
+    ],
+    '/settings': [
+      { label: 'Home', path: '/personalized-dashboard' },
+      { label: 'Settings', path: '/settings' }
     ]
   };
 

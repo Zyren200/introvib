@@ -9,13 +9,13 @@ const WelcomeMessage = () => {
           <Icon name="Sparkles" size={40} color="var(--color-primary)" />
         </div>
       </div>
-      
+
       <h1 className="text-3xl md:text-4xl lg:text-5xl font-heading font-semibold text-foreground">
-        Welcome to Your Quiet Space
+        Welcome to IntroVibe
       </h1>
-      
+
       <p className="text-base md:text-lg lg:text-xl text-muted-foreground font-body max-w-2xl mx-auto leading-relaxed">
-        A calm, supportive environment designed for learning and meaningful connections at your own pace
+        A personality-based social platform that starts with your interests, confirms your vibe, and unlocks matching that fits you
       </p>
     </div>
   );

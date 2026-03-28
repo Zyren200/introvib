@@ -2,34 +2,46 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Icon from '../AppIcon';
 import Button from './Button';
-import { useAuth } from '../../context/AuthContext';
+import { useIntroVibeAuth } from '../../introVibeAuth';
+import { getPostAuthRoute } from '../../utils/introVibe';
 
 const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, currentUser } = useIntroVibeAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const navigationItems = [
     {
-      label: 'Your Dashboard',
+      label: 'Home',
       path: '/personalized-dashboard',
-      icon: 'LayoutDashboard',
-      description: 'Central coordination space'
+      icon: 'Home',
+      description: 'Your IntroVibe home'
     },
     {
-      label: 'Adaptive Quiz',
+      label: 'Personality Test',
       path: '/adaptive-quiz',
       icon: 'ClipboardList',
-      description: 'Personalized assessment'
+      description: '5-question personality check'
     },
     {
-      label: 'Connect Gently',
+      label: 'Matches & Chat',
       path: '/find-matches-conversations',
-      icon: 'MessageCircle',
-      description: 'Discovery and messaging'
+      icon: 'MessagesSquare',
+      description: 'Find people based on personality and interests'
     },
+    ...(currentUser?.personalityType === 'Introvert'
+      ? [
+          {
+            label: 'Sudoku',
+            path: '/sudoku-puzzle',
+            icon: 'Grid3X3',
+            description: 'Solve the puzzle to unlock chat access'
+          }
+        ]
+      : []),
     {
       label: 'Settings',
       path: '/settings',
@@ -58,11 +70,14 @@ const Header = () => {
   };
 
   const closeLogoutConfirm = () => {
+    if (isLoggingOut) return;
     setShowLogoutConfirm(false);
   };
 
-  const confirmLogout = () => {
-    logout();
+  const confirmLogout = async () => {
+    setIsLoggingOut(true);
+    await logout();
+    setIsLoggingOut(false);
     setShowLogoutConfirm(false);
     navigate('/login-personal-info');
   };
@@ -72,14 +87,14 @@ const Header = () => {
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           <Link 
-            to="/personalized-dashboard" 
+            to={getPostAuthRoute(currentUser)}
             className="flex items-center space-x-3 transition-gentle hover:opacity-80"
           >
             <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center transition-gentle">
               <Icon name="Sparkles" size={24} color="var(--color-primary)" />
             </div>
             <span className="text-xl font-heading font-semibold text-foreground">
-              ISF_Ease
+              IntroVibe
             </span>
           </Link>
 
@@ -197,10 +212,10 @@ const Header = () => {
               Are you sure you want to log out of your account?
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={closeLogoutConfirm}>
+              <Button variant="outline" onClick={closeLogoutConfirm} disabled={isLoggingOut}>
                 Cancel
               </Button>
-              <Button variant="danger" iconName="LogOut" onClick={confirmLogout}>
+              <Button variant="danger" iconName="LogOut" onClick={confirmLogout} loading={isLoggingOut}>
                 Yes, log out
               </Button>
             </div>

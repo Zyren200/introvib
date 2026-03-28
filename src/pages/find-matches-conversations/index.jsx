@@ -1,719 +1,1159 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import Icon from '../../components/AppIcon';
-import Button from '../../components/ui/Button';
-import Header from '../../components/ui/Header';
-import QuietModeIndicator from '../../components/ui/QuietModeIndicator';
-import NavigationBreadcrumb from '../../components/ui/NavigationBreadcrumb';
-import MatchCard from './components/MatchCard';
-import ConversationThread from './components/ConversationThread';
-import MessageComposer from './components/MessageComposer';
-import MessageBubble from './components/MessageBubble';
-import EmptyState from './components/EmptyState';
-import FilterPanel from './components/FilterPanel';
-import { useAppState } from '../../context/AppStateContext';
-import { useAuth } from '../../context/AuthContext';
-
-const CONVERSATIONS_KEY = 'isfEaseConversations';
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-
-const createDefaultMatchFilters = () => ({
-  interests: [],
-  personalityTags: [],
-  availability: [],
-  compatibilityRange: [70, 100],
-});
-
-const normalizeText = (value) => (value || '').toString().trim().toLowerCase();
-
-const loadConversations = () => {
-  try {
-    const raw = localStorage.getItem(CONVERSATIONS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (error) {
-    console.error('Failed to load conversations', error);
-  }
-  return {};
-};
-
-const saveConversations = (data) => {
-  try {
-    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(data));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('isf-conversations-updated'));
-    }
-  } catch (error) {
-    console.error('Failed to save conversations', error);
-  }
-};
-
-const getConversationKey = (a, b) => [a, b].sort().join(':');
+import React, { useEffect, useMemo, useState } from "react";
+import Header from "../../components/ui/Header";
+import NavigationBreadcrumb from "../../components/ui/NavigationBreadcrumb";
+import Button from "../../components/ui/Button";
+import Icon from "../../components/AppIcon";
+import MatchCard from "./components/MatchCard";
+import ConversationThread from "./components/ConversationThread";
+import MessageComposer from "./components/MessageComposer";
+import MessageBubble from "./components/MessageBubble";
+import EmptyState from "./components/EmptyState";
+import { useIntroVibeAuth } from "../../introVibeAuth";
+import {
+  createRemoteGroup,
+  fetchRemoteChatState,
+  getDirectChatKey,
+  loadLegacyDirectChats,
+  loadLegacyGroupChats,
+  markRemoteDirectRead,
+  markRemoteGroupRead,
+  persistLegacyDirectChats,
+  persistLegacyGroupChats,
+  sendRemoteDirectMessage,
+  sendRemoteGroupMessage,
+  shouldFallbackToLegacyChat,
+  shouldUseRemoteChat,
+} from "../../lib/introVibeChat";
+import {
+  fetchRemoteMatches,
+  shouldFallbackToLegacyMatches,
+  shouldUseRemoteMatches,
+} from "../../lib/introVibeMatches";
+import {
+  PERSONALITY_META,
+  buildMatchSummary,
+  canCreateGroupChats,
+} from "../../utils/introVibe";
 
 const defaultAvatar = (seed) =>
-  `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed || 'calm')}`;
+  `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed || "introvibe")}`;
+
+const NO_MATCH_STATUS_MESSAGE =
+  "Can't find a match right now. IntroVibe only shows people with the same personality type and shared interests.";
+
+const formatSyncTime = (timestamp) => {
+  if (!timestamp) return "";
+
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
 
 const FindMatchesConversations = () => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { isQuietNow, queueNotification, quietState, clearPendingNotifications } = useAppState();
-  const { currentUser, users, isUserOnline, presenceVersion } = useAuth();
+  const {
+    currentUser,
+    users,
+    isUserOnline,
+    authMode,
+    authReady,
+    isRefreshingUsers,
+    lastUsersSyncAt,
+    refreshUsers,
+  } = useIntroVibeAuth();
+  const [activeTab, setActiveTab] = useState("matches");
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [directChats, setDirectChats] = useState(loadLegacyDirectChats);
+  const [groupChats, setGroupChats] = useState(loadLegacyGroupChats);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
+  const [chatMode, setChatMode] = useState('legacy-local');
+  const [isLoadingChats, setIsLoadingChats] = useState(true);
+  const [remoteMatchResults, setRemoteMatchResults] = useState([]);
+  const [matchesMode, setMatchesMode] = useState("legacy-local");
+  const [isLoadingMatches, setIsLoadingMatches] = useState(true);
+  const [lastMatchesSyncAt, setLastMatchesSyncAt] = useState(null);
 
-  const [activeTab, setActiveTab] = useState('discover');
-  const [showArchived, setShowArchived] = useState(false);
-  const [selectedPeerId, setSelectedPeerId] = useState(null);
-  const [savedMessageBanner, setSavedMessageBanner] = useState(null);
-  const [conversations, setConversations] = useState(loadConversations);
-  const [matchResults, setMatchResults] = useState([]);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [composerPrefill, setComposerPrefill] = useState('');
-  const [appliedFilters, setAppliedFilters] = useState(createDefaultMatchFilters);
+  const personalityType = currentUser?.personalityType;
+  const personalityMeta = PERSONALITY_META[personalityType];
+  const groupChatEnabled = canCreateGroupChats(personalityType);
+
+  const buildLocalMatches = (userCollection = users) =>
+    userCollection
+      .filter((user) => user.id !== currentUser?.id && user.assessmentCompleted)
+      .map((peer) => {
+        const match = buildMatchSummary(currentUser, peer);
+        return toDisplayMatch({
+          id: peer.id,
+          username: peer.username,
+          personalityType: peer.personalityType,
+          compatibilityScore: match.compatibilityScore,
+          sharedInterests: match.sharedInterests,
+          personalityTags: match.personalityTags,
+          samePersonality: match.samePersonality,
+          presence: peer.presence,
+        });
+      })
+      .filter((match) => match.samePersonality && match.sharedInterests.length > 0)
+      .sort((a, b) => b.compatibilityScore - a.compatibilityScore);
 
   useEffect(() => {
-    saveConversations(conversations);
-  }, [conversations]);
+    if (chatMode !== 'legacy-local') return;
+    persistLegacyDirectChats(directChats);
+  }, [chatMode, directChats]);
 
   useEffect(() => {
-    if (!currentUser) {
-      navigate('/login-personal-info');
+    if (chatMode !== 'legacy-local') return;
+    persistLegacyGroupChats(groupChats);
+  }, [chatMode, groupChats]);
+
+  useEffect(() => {
+    if (!authReady) {
+      return undefined;
     }
-  }, [currentUser, navigate]);
 
+    let cancelled = false;
+
+    const hydrateChatState = async () => {
+      setIsLoadingChats(true);
+      setStatusMessage('');
+
+      if (shouldUseRemoteChat(authMode, currentUser?.id)) {
+        try {
+          const payload = await fetchRemoteChatState();
+          if (cancelled) return;
+
+          setDirectChats(payload?.directChats || {});
+          setGroupChats(payload?.groupChats || []);
+          setChatMode('railway-api');
+          setIsLoadingChats(false);
+          return;
+        } catch (error) {
+          if (!shouldFallbackToLegacyChat(error)) {
+            if (!cancelled) {
+              setStatusMessage(error.message || 'Unable to load your chat history right now.');
+              setChatMode('railway-api');
+              setIsLoadingChats(false);
+            }
+            return;
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setDirectChats(loadLegacyDirectChats());
+        setGroupChats(loadLegacyGroupChats());
+        setChatMode('legacy-local');
+        setIsLoadingChats(false);
+      }
+    };
+
+    hydrateChatState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, authReady, currentUser?.id]);
+
+  const applyRemoteMatches = (payload) => {
+    setRemoteMatchResults(Array.isArray(payload?.matches) ? payload.matches : []);
+    setMatchesMode("railway-api");
+    setLastMatchesSyncAt(payload?.generatedAt || Date.now());
+  };
+
+  useEffect(() => {
+    if (!authReady) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const hydrateMatchState = async () => {
+      setIsLoadingMatches(true);
+
+      if (shouldUseRemoteMatches(authMode, currentUser?.id)) {
+        try {
+          const [payload] = await Promise.all([
+            fetchRemoteMatches(),
+            refreshUsers({ silent: true }),
+          ]);
+
+          if (cancelled) return;
+
+          applyRemoteMatches(payload);
+          setIsLoadingMatches(false);
+          return;
+        } catch (error) {
+          if (!shouldFallbackToLegacyMatches(error)) {
+            if (!cancelled) {
+              setStatusMessage(error.message || "Unable to load matches right now.");
+              setMatchesMode("railway-api");
+              setIsLoadingMatches(false);
+            }
+            return;
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setRemoteMatchResults([]);
+        setMatchesMode("legacy-local");
+        setLastMatchesSyncAt(lastUsersSyncAt || Date.now());
+        setIsLoadingMatches(false);
+      }
+    };
+
+    hydrateMatchState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, authReady, currentUser?.id, lastUsersSyncAt]);
+
+  const toDisplayMatch = (match) => {
+    const username = match?.name || match?.username || "IntroVibe user";
+    const peerFromUsers = users.find((user) => user.id === match?.id) || null;
+    const resolvedPersonalityType =
+      match?.personalityType || peerFromUsers?.personalityType || "Ambivert";
+    const onlinePeer = peerFromUsers || { presence: match?.presence };
+
+    return {
+      id: match?.id,
+      name: username,
+      avatar: defaultAvatar(username),
+      avatarAlt: `${username} avatar`,
+      isOnline: isUserOnline(onlinePeer),
+      major: resolvedPersonalityType,
+      year: PERSONALITY_META[resolvedPersonalityType]?.chatLabel || "Chat access",
+      personalityType: resolvedPersonalityType,
+      compatibilityScore: Number(match?.compatibilityScore) || 0,
+      sharedInterests: Array.isArray(match?.sharedInterests) ? match.sharedInterests : [],
+      personalityTags: Array.isArray(match?.personalityTags) ? match.personalityTags : [],
+      bio: PERSONALITY_META[resolvedPersonalityType]?.description || "",
+      samePersonality: Boolean(match?.samePersonality),
+      status: match?.status || "suggested",
+    };
+  };
   const peers = useMemo(
-    () => users?.filter((u) => u?.id !== currentUser?.id) || [],
+    () => users.filter((user) => user.id !== currentUser?.id && user.assessmentCompleted),
     [users, currentUser]
   );
 
-  const normalize = (arr) =>
-    (arr || [])
-      .map((v) => (v || '').toString().trim().toLowerCase())
-      .filter(Boolean);
+  const localMatchResults = useMemo(
+    () => buildLocalMatches(users),
+    [currentUser, users, isUserOnline]
+  );
 
-  const calcMatchScore = (peer) => {
-    const userInterests = normalize(currentUser?.interests);
-    const userTags = normalize(currentUser?.tags);
-    const peerInterests = normalize(peer?.interests);
-    const peerTags = normalize(peer?.tags);
+  const remoteDisplayMatches = useMemo(
+    () => remoteMatchResults.map((match) => toDisplayMatch(match)),
+    [remoteMatchResults, users, isUserOnline]
+  );
 
-    const sharedInterests = userInterests.filter((i) => peerInterests.includes(i));
-    const sharedTags = userTags.filter((t) => peerTags.includes(t));
+  const matchResults = useMemo(
+    () => (matchesMode === "railway-api" ? remoteDisplayMatches : localMatchResults),
+    [localMatchResults, matchesMode, remoteDisplayMatches]
+  );
+  const availableGroupMembers = useMemo(
+    () => matchResults.filter((match) => match.id !== currentUser?.id),
+    [matchResults, currentUser]
+  );
 
-    const interestScore =
-      userInterests.length && peerInterests.length
-        ? (sharedInterests.length / Math.max(userInterests.length, peerInterests.length)) * 100
-        : 0;
-    const tagScore =
-      userTags.length && peerTags.length
-        ? (sharedTags.length / Math.max(userTags.length, peerTags.length)) * 100
-        : 0;
+  const directThreads = useMemo(
+    () =>
+      peers
+        .map((peer) => {
+          const key = getDirectChatKey(currentUser?.id, peer.id);
+          const conversation = directChats[key];
+          const messages = conversation?.messages || [];
 
-    const overall =
-      userInterests.length && userTags.length
-        ? Math.round((interestScore + tagScore) / 2)
-        : Math.round(Math.max(interestScore, tagScore));
+          if (messages.length === 0) return null;
 
-    return {
-      sharedInterests,
-      sharedTags,
-      score: overall,
-    };
-  };
+          const lastMessage = messages[messages.length - 1];
+          const unreadCount = messages.filter(
+            (message) =>
+              message.senderId !== currentUser?.id &&
+              !(message.readBy || []).includes(currentUser?.id)
+          ).length;
 
-  const handleFindMatches = () => {
-    setHasSearched(true);
-    const results = peers
-      .map((peer) => {
-        const match = calcMatchScore(peer);
-        return { peer, match };
-      })
-      .filter(({ match }) => match.sharedInterests.length > 0 && match.sharedTags.length > 0)
-      .map(({ peer, match }) => ({
-        ...peer,
-        compatibilityScore: match.score || 90,
-        sharedInterests: match.sharedInterests,
-        personalityTags: match.sharedTags,
-      }))
-      .sort((a, b) => (b.compatibilityScore || 0) - (a.compatibilityScore || 0));
-    setMatchResults(results);
-    try {
-      sessionStorage.setItem('isf-latest-match-count', results.length?.toString());
-    } catch (e) {
-      console.error('Unable to store match count', e);
+          return {
+            id: peer.id,
+            name: peer.username,
+            avatar: defaultAvatar(peer.username),
+            avatarAlt: `${peer.username} avatar`,
+            lastMessage: lastMessage?.content || "Attachment",
+            lastMessageTime: lastMessage?.timestamp || conversation?.lastUpdated,
+            unreadCount,
+            isOnline: isUserOnline(peer),
+            messageCount: messages.length,
+            hasPrompt: false,
+            isDraft: false,
+            status: "direct",
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0)),
+    [peers, directChats, currentUser, isUserOnline]
+  );
+
+  const joinedGroups = useMemo(
+    () => groupChats.filter((group) => (group?.memberIds || []).includes(currentUser?.id)),
+    [groupChats, currentUser]
+  );
+
+  const groupThreads = useMemo(
+    () =>
+      joinedGroups
+        .map((group) => {
+          const messages = group?.messages || [];
+          const lastMessage = messages[messages.length - 1];
+          const unreadCount = messages.filter(
+            (message) =>
+              message.senderId !== currentUser?.id &&
+              !(message.readBy || []).includes(currentUser?.id)
+          ).length;
+
+          return {
+            id: group.id,
+            name: `# ${group.name}`,
+            avatar: defaultAvatar(group.name),
+            avatarAlt: `${group.name} group avatar`,
+            lastMessage: lastMessage?.content || "Group created",
+            lastMessageTime: lastMessage?.timestamp || group?.lastUpdated,
+            unreadCount,
+            isOnline: false,
+            messageCount: messages.length,
+            hasPrompt: false,
+            isDraft: false,
+            status: "group",
+          };
+        })
+        .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0)),
+    [joinedGroups, currentUser]
+  );
+
+  const selectedMatchPeer =
+    selectedChat?.type === "direct"
+      ? matchResults.find((match) => match.id === selectedChat.id) || null
+      : null;
+
+  const selectedDirectPeer =
+    selectedChat?.type === "direct"
+      ? peers.find((peer) => peer.id === selectedChat.id) ||
+        (selectedMatchPeer
+          ? {
+              id: selectedMatchPeer.id,
+              username: selectedMatchPeer.name,
+              personalityType: selectedMatchPeer.personalityType,
+            }
+          : null)
+      : null;
+  const selectedGroup =
+    selectedChat?.type === "group"
+      ? joinedGroups.find((group) => group.id === selectedChat.id) || null
+      : null;
+
+  const selectedMessages = useMemo(() => {
+    if (selectedChat?.type === "direct" && selectedDirectPeer) {
+      const key = getDirectChatKey(currentUser?.id, selectedDirectPeer.id);
+      return directChats[key]?.messages || [];
     }
-    window.dispatchEvent(new CustomEvent('isf-new-matches', { detail: { count: results.length } }));
-  };
 
-  const filteredMatchResults = useMemo(() => {
-    if (!matchResults.length) return [];
-
-    const interestFilters = (appliedFilters?.interests || []).map(normalizeText).filter(Boolean);
-    const personalityFilters = (appliedFilters?.personalityTags || []).map(normalizeText).filter(Boolean);
-    const availabilityFilters = (appliedFilters?.availability || []).map(normalizeText).filter(Boolean);
-    const [minCompatibility = 0, maxCompatibility = 100] = appliedFilters?.compatibilityRange || [0, 100];
-    const hasCompatibilityOverride =
-      minCompatibility !== 70 || maxCompatibility !== 100;
-
-    return matchResults.filter((match) => {
-      const sharedInterests = (match?.sharedInterests || []).map(normalizeText);
-      const sharedTags = (match?.personalityTags || []).map(normalizeText);
-
-      const matchesInterestFilter =
-        interestFilters.length === 0 ||
-        sharedInterests.some((interest) => interestFilters.includes(interest));
-
-      const matchesPersonalityFilter =
-        personalityFilters.length === 0 ||
-        sharedTags.some((tag) => personalityFilters.includes(tag));
-
-      const compatibilityScore = Number(match?.compatibilityScore) || 0;
-      const matchesCompatibility =
-        !hasCompatibilityOverride ||
-        (compatibilityScore >= minCompatibility && compatibilityScore <= maxCompatibility);
-
-      const isActiveToday = (() => {
-        const lastActiveAt = match?.presence?.lastActiveAt || match?.presence?.lastLogoutAt;
-        return Number.isFinite(lastActiveAt) && Date.now() - lastActiveAt <= ONE_DAY_MS;
-      })();
-
-      const respondsWithin24h = (() => {
-        if (!currentUser?.id || !match?.id) return false;
-        const key = getConversationKey(currentUser.id, match.id);
-        const lastUpdated = conversations?.[key]?.lastUpdated;
-        return Number.isFinite(lastUpdated) && Date.now() - lastUpdated <= ONE_DAY_MS;
-      })();
-
-      const matchesAvailabilityFilter =
-        availabilityFilters.length === 0 ||
-        availabilityFilters.some((filterOption) => {
-          if (filterOption === 'available now') return isUserOnline(match);
-          if (filterOption === 'active today') return isActiveToday;
-          if (filterOption === 'responds within 24h') return respondsWithin24h;
-          return false;
-        });
-
-      return (
-        matchesInterestFilter &&
-        matchesPersonalityFilter &&
-        matchesCompatibility &&
-        matchesAvailabilityFilter
-      );
-    });
-  }, [matchResults, appliedFilters, currentUser, conversations, isUserOnline]);
-
-  const hasActiveFilters = useMemo(() => {
-    const hasCompatibilityOverride =
-      (appliedFilters?.compatibilityRange?.[0] ?? 70) !== 70 ||
-      (appliedFilters?.compatibilityRange?.[1] ?? 100) !== 100;
-    return (
-      (appliedFilters?.interests?.length || 0) > 0 ||
-      (appliedFilters?.personalityTags?.length || 0) > 0 ||
-      (appliedFilters?.availability?.length || 0) > 0 ||
-      hasCompatibilityOverride
-    );
-  }, [appliedFilters]);
-
-  const getConversation = (peerId) => {
-    const key = getConversationKey(currentUser?.id, peerId);
-    return conversations?.[key] || { messages: [], participants: [currentUser?.id, peerId] };
-  };
-
-  const upsertConversation = (peerId, updater) => {
-    setConversations((prev) => {
-      const key = getConversationKey(currentUser?.id, peerId);
-      const existing = prev?.[key] || { messages: [], participants: [currentUser?.id, peerId] };
-      const updated = updater(existing);
-      return { ...prev, [key]: { ...existing, ...updated, participants: existing.participants } };
-    });
-  };
-
-  const addMessage = (peerId, senderId, content, options = {}) => {
-    const status = getConversation(peerId)?.status || 'active';
-    if (status === 'blocked' || status === 'restricted') {
-      setSavedMessageBanner(`Cannot send while conversation is ${status}.`);
-      return;
+    if (selectedChat?.type === "group" && selectedGroup) {
+      return selectedGroup?.messages || [];
     }
-    const message = {
-      id: crypto.randomUUID(),
-      senderId,
-      content: typeof content === 'string' ? content : content?.text || '',
-      imageData: content?.imageData || null,
-      timestamp: Date.now(),
-      readBy: [senderId],
-      isPromptUsed: options?.isPromptUsed || false,
-    };
-    upsertConversation(peerId, (conv) => ({
-      messages: [...(conv?.messages || []), message],
+
+    return [];
+  }, [selectedChat, selectedDirectPeer, selectedGroup, currentUser, directChats]);
+
+  const applyRemoteChatState = (payload) => {
+    setDirectChats(payload?.directChats || {});
+    setGroupChats(payload?.groupChats || []);
+    setChatMode('railway-api');
+  };
+
+  const upsertLegacyDirectChat = (peerId, updater) => {
+    setDirectChats((prev) => {
+      const key = getDirectChatKey(currentUser?.id, peerId);
+      const existing = prev[key] || { participants: [currentUser?.id, peerId], messages: [] };
+      return {
+        ...prev,
+        [key]: updater(existing),
+      };
+    });
+  };
+
+  const addLegacyDirectMessage = (peerId, payload) => {
+    const message = typeof payload === 'string' ? { text: payload } : payload;
+
+    upsertLegacyDirectChat(peerId, (existing) => ({
+      ...existing,
+      participants: existing.participants || [currentUser?.id, peerId],
       lastUpdated: Date.now(),
+      messages: [
+        ...(existing.messages || []),
+        {
+          id: crypto.randomUUID(),
+          senderId: currentUser?.id,
+          content: message?.text || '',
+          imageData: message?.imageData || null,
+          timestamp: Date.now(),
+          readBy: [currentUser?.id],
+        },
+      ],
     }));
   };
 
-  const markConversationRead = (peerId) => {
-    upsertConversation(peerId, (conv) => ({
-      ...conv,
-      messages: (conv?.messages || []).map((m) =>
-        m.readBy?.includes(currentUser?.id)
-          ? m
-          : { ...m, readBy: [...(m.readBy || []), currentUser?.id] }
+  const addLegacyGroupMessage = (groupId, payload) => {
+    const message = typeof payload === 'string' ? { text: payload } : payload;
+
+    setGroupChats((prev) =>
+      prev.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              lastUpdated: Date.now(),
+              messages: [
+                ...(group.messages || []),
+                {
+                  id: crypto.randomUUID(),
+                  senderId: currentUser?.id,
+                  content: message?.text || '',
+                  imageData: message?.imageData || null,
+                  timestamp: Date.now(),
+                  readBy: [currentUser?.id],
+                },
+              ],
+            }
+          : group
+      )
+    );
+  };
+
+  const markLegacyDirectRead = (peerId) => {
+    upsertLegacyDirectChat(peerId, (existing) => ({
+      ...existing,
+      messages: (existing.messages || []).map((message) =>
+        (message.readBy || []).includes(currentUser?.id)
+          ? message
+          : { ...message, readBy: [...(message.readBy || []), currentUser?.id] }
       ),
     }));
   };
 
-  const setConversationStatus = (peerId, status) => {
-    upsertConversation(peerId, (conv) => ({
-      ...conv,
-      status,
-    }));
+  const markLegacyGroupRead = (groupId) => {
+    setGroupChats((prev) =>
+      prev.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              messages: (group.messages || []).map((message) =>
+                (message.readBy || []).includes(currentUser?.id)
+                  ? message
+                  : { ...message, readBy: [...(message.readBy || []), currentUser?.id] }
+              ),
+            }
+          : group
+      )
+    );
   };
 
-  const deleteConversation = (peerId) => {
-    setConversations((prev) => {
-      const key = getConversationKey(currentUser?.id, peerId);
-      const updated = { ...prev };
-      delete updated[key];
-      return updated;
-    });
-    if (selectedPeerId === peerId) {
-      setSelectedPeerId(null);
+  const fallbackToLegacyChat = () => {
+    setChatMode('legacy-local');
+    setStatusMessage('Switched to local chat fallback while the API is unavailable.');
+  };
+
+  const handleStartDirectChat = async (peerId) => {
+    setActiveTab('messages');
+    setSelectedChat({ type: 'direct', id: peerId });
+    setStatusMessage('');
+
+    const key = getDirectChatKey(currentUser?.id, peerId);
+
+    if (chatMode === 'railway-api') {
+      try {
+        let payload = await markRemoteDirectRead(peerId);
+        applyRemoteChatState(payload);
+
+        const remoteMessages = payload?.directChats?.[key]?.messages || [];
+        if (!remoteMessages.length) {
+          payload = await sendRemoteDirectMessage(peerId, 'Hey, I saw we matched on IntroVibe.');
+          applyRemoteChatState(payload);
+        }
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyChat(error)) {
+          setStatusMessage(error.message || 'Unable to start this chat right now.');
+          return;
+        }
+
+        fallbackToLegacyChat();
+      }
+    }
+
+    markLegacyDirectRead(peerId);
+    if (!(directChats[key]?.messages || []).length) {
+      addLegacyDirectMessage(peerId, 'Hey, I saw we matched on IntroVibe.');
     }
   };
 
-  const conversationThreads = useMemo(() => {
-    return peers
-      .map((peer) => {
-        const conv = getConversation(peer.id);
-        const messages = conv?.messages || [];
-        if (messages.length === 0) return null;
-        const lastMessage = messages[messages.length - 1];
-        const unreadCount = messages.filter(
-          (m) => m.senderId !== currentUser?.id && !(m.readBy || []).includes(currentUser?.id)
-        ).length;
-        return {
-          id: peer.id,
-          name: peer.username,
-          avatar: defaultAvatar(peer.username),
-          lastMessage: lastMessage?.content || 'No messages yet',
-          lastMessageTime: lastMessage?.timestamp || peer.createdAt,
-          unreadCount,
-          isOnline: isUserOnline(peer),
-          messageCount: messages.length,
-          hasPrompt: false,
-          isDraft: false,
-          status: conv?.status || 'active',
-        };
-      })
-      .filter(Boolean);
-  }, [peers, conversations, currentUser, isUserOnline, presenceVersion]);
-
-  useEffect(() => {
-    const promptFromDashboard = location.state?.initialPrompt;
-    if (typeof promptFromDashboard !== 'string') return;
-
-    const normalizedPrompt = promptFromDashboard.trim();
-    if (!normalizedPrompt) return;
-
-    setComposerPrefill(normalizedPrompt);
+  const handleSelectDirectThread = async (peerId) => {
     setActiveTab('messages');
+    setSelectedChat({ type: 'direct', id: peerId });
+    setStatusMessage('');
 
-    const sortedThreads = [...conversationThreads]
-      .sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
-    const preferredThread =
-      sortedThreads.find((thread) => thread.status === 'active') ||
-      sortedThreads.find((thread) => thread.status !== 'archived');
+    if (chatMode === 'railway-api') {
+      try {
+        const payload = await markRemoteDirectRead(peerId);
+        applyRemoteChatState(payload);
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyChat(error)) {
+          setStatusMessage(error.message || 'Unable to open this conversation right now.');
+          return;
+        }
 
-    if (preferredThread?.id) {
-      setSelectedPeerId(preferredThread.id);
-      markConversationRead(preferredThread.id);
-      setSavedMessageBanner('Prompt loaded from dashboard. You can send or edit it.');
-    } else {
-      setSavedMessageBanner('Prompt loaded from dashboard. Start or select a conversation to use it.');
+        fallbackToLegacyChat();
+      }
     }
 
-    navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state, conversationThreads, markConversationRead, navigate]);
+    markLegacyDirectRead(peerId);
+  };
 
-  const selectedConversationData = selectedPeerId
-    ? peers.find((p) => p.id === selectedPeerId)
-    : null;
-
-  const selectedConversation = selectedPeerId ? getConversation(selectedPeerId) : null;
-  const selectedConversationStatus = selectedConversation?.status || 'active';
-
-  const selectedMessages = selectedConversation
-    ? selectedConversation?.messages || []
-    : [];
-
-  const handleSendHello = (peerId) => {
-    setSelectedPeerId(peerId);
+  const handleSelectGroupThread = async (groupId) => {
     setActiveTab('messages');
-    addMessage(peerId, currentUser?.id, 'Sent a quiet hello');
+    setSelectedChat({ type: 'group', id: groupId });
+    setStatusMessage('');
+
+    if (chatMode === 'railway-api') {
+      try {
+        const payload = await markRemoteGroupRead(groupId);
+        applyRemoteChatState(payload);
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyChat(error)) {
+          setStatusMessage(error.message || 'Unable to open this group right now.');
+          return;
+        }
+
+        fallbackToLegacyChat();
+      }
+    }
+
+    markLegacyGroupRead(groupId);
   };
 
-  const handleSaveLater = () => {
-    setSavedMessageBanner('Saved for later. You can return anytime.');
-  };
+  const handleSendMessage = async (payload) => {
+    if (!selectedChat) return;
+    setStatusMessage('');
 
-  const handleSelectConversation = (peerId) => {
-    setSelectedPeerId(peerId);
-    setActiveTab('messages');
-    markConversationRead(peerId);
-  };
+    if (chatMode === 'railway-api') {
+      try {
+        const nextState = selectedChat.type === 'direct'
+          ? await sendRemoteDirectMessage(selectedChat.id, payload)
+          : await sendRemoteGroupMessage(selectedChat.id, payload);
+        applyRemoteChatState(nextState);
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyChat(error)) {
+          setStatusMessage(error.message || 'Unable to send your message right now.');
+          return;
+        }
 
-  const handleSendMessage = (payload) => {
-    if (!selectedPeerId) return;
-    const message = typeof payload === 'string' ? { text: payload } : payload;
-    if (isQuietNow) {
-      queueNotification({
-        type: 'message',
-        from: currentUser?.username,
-        content: message?.text,
-      });
-      setSavedMessageBanner('Message stored quietly. It will send when Quiet Mode ends.');
+        fallbackToLegacyChat();
+      }
+    }
+
+    if (selectedChat.type === 'direct') {
+      addLegacyDirectMessage(selectedChat.id, payload);
       return;
     }
-    addMessage(selectedPeerId, currentUser?.id, message);
+
+    addLegacyGroupMessage(selectedChat.id, payload);
   };
 
-  const handleSaveDraft = (message) => {
-    setSavedMessageBanner(`Draft saved (${message.length} characters).`);
-  };
+  const handleCreateGroup = async () => {
+    if (!groupChatEnabled) return;
 
-  const handleReplyLater = () => {
-    setActiveTab('discover');
-    setSavedMessageBanner('Marked to reply later. We will keep it here.');
-  };
-
-  useEffect(() => {
-    if (!isQuietNow && quietState?.pendingNotifications?.length > 0) {
-      setSavedMessageBanner(
-        `${quietState.pendingNotifications.length} message(s) arrived during Quiet Mode.`
-      );
+    if (availableGroupMembers.length < 2) {
+      setActiveTab('matches');
+      setStatusMessage("Can't create a group yet because you need at least two matched users.");
+      return;
     }
-  }, [isQuietNow, quietState?.pendingNotifications]);
 
-  if (!currentUser) {
-    return null;
-  }
+    const trimmedGroupName = groupName.trim();
+    if (!trimmedGroupName) {
+      setStatusMessage('Add a group name first.');
+      return;
+    }
+
+    if (selectedGroupMembers.length < 2) {
+      setStatusMessage('Select at least two people to create a group.');
+      return;
+    }
+
+    if (chatMode === 'railway-api') {
+      try {
+        const payload = await createRemoteGroup(trimmedGroupName, selectedGroupMembers);
+        applyRemoteChatState(payload);
+        setGroupName('');
+        setSelectedGroupMembers([]);
+        setStatusMessage('Group chat created.');
+        setSelectedChat({ type: 'group', id: payload?.groupId });
+        setActiveTab('messages');
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyChat(error)) {
+          setStatusMessage(error.message || 'Unable to create that group right now.');
+          return;
+        }
+
+        fallbackToLegacyChat();
+      }
+    }
+
+    const newGroup = {
+      id: crypto.randomUUID(),
+      name: trimmedGroupName,
+      createdBy: currentUser?.id,
+      memberIds: [currentUser?.id, ...selectedGroupMembers],
+      lastUpdated: Date.now(),
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          senderId: currentUser?.id,
+          content: `Welcome to ${trimmedGroupName}.`,
+          imageData: null,
+          timestamp: Date.now(),
+          readBy: [currentUser?.id],
+        },
+      ],
+    };
+
+    setGroupChats((prev) => [newGroup, ...prev]);
+    setGroupName('');
+    setSelectedGroupMembers([]);
+    setStatusMessage('Group chat created.');
+    setSelectedChat({ type: 'group', id: newGroup.id });
+    setActiveTab('messages');
+  };
+
+  const toggleGroupMember = (memberId) => {
+    setSelectedGroupMembers((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((entry) => entry !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
+  const handleRefreshMatches = async ({
+    showSuccessMessage = true,
+    showNoMatchMessage = true,
+  } = {}) => {
+    setStatusMessage("");
+
+    if (shouldUseRemoteMatches(authMode, currentUser?.id)) {
+      setIsLoadingMatches(true);
+
+      try {
+        const [payload] = await Promise.all([
+          fetchRemoteMatches(),
+          refreshUsers({ silent: true }),
+        ]);
+
+        applyRemoteMatches(payload);
+        if (!payload?.matches?.length && showNoMatchMessage) {
+          setStatusMessage(NO_MATCH_STATUS_MESSAGE);
+        } else if (showSuccessMessage) {
+          setStatusMessage("Matches refreshed.");
+        }
+        return;
+      } catch (error) {
+        if (!shouldFallbackToLegacyMatches(error)) {
+          setStatusMessage(error.message || "Unable to refresh matches right now.");
+          return;
+        }
+
+        setRemoteMatchResults([]);
+        setMatchesMode("legacy-local");
+        setStatusMessage("Live sync is unavailable right now.");
+        return;
+      } finally {
+        setIsLoadingMatches(false);
+      }
+    }
+
+    const result = await refreshUsers();
+    if (result?.success) {
+      setLastMatchesSyncAt(Date.now());
+      const nextMatches = buildLocalMatches(result?.users || users);
+      if (!nextMatches.length && showNoMatchMessage) {
+        setStatusMessage(NO_MATCH_STATUS_MESSAGE);
+      } else if (showSuccessMessage) {
+        setStatusMessage("Matches refreshed.");
+      }
+      return;
+    }
+
+    if (result?.fallback) {
+      setStatusMessage("Live sync is unavailable right now.");
+      return;
+    }
+
+    if (result?.error) {
+      setStatusMessage(result.error);
+    }
+  };
+
+  const handleFindMatchesAction = async () => {
+    setActiveTab("matches");
+
+    if (matchResults.length > 0) {
+      setStatusMessage("Choose a match to start chatting.");
+      return;
+    }
+
+    await handleRefreshMatches({
+      showSuccessMessage: false,
+      showNoMatchMessage: true,
+    });
+  };
+
+  const handleSendFirstMessage = async () => {
+    if (directThreads.length > 0) {
+      await handleSelectDirectThread(directThreads[0].id);
+      return;
+    }
+
+    if (matchResults.length > 0) {
+      await handleStartDirectChat(matchResults[0].id);
+      return;
+    }
+
+    setActiveTab("matches");
+    await handleRefreshMatches({
+      showSuccessMessage: false,
+      showNoMatchMessage: true,
+    });
+  };
+
+  const latestSyncAt = lastMatchesSyncAt || lastUsersSyncAt;
+  const syncLabel = latestSyncAt
+    ? `Last synced ${formatSyncTime(latestSyncAt)}`
+    : matchesMode === "railway-api" || authMode === "railway-api"
+      ? "Auto-refresh is on"
+      : "Refresh to pull the latest matches";
+  const totalThreadCount = directThreads.length + groupThreads.length;
+  const selectedChatName = selectedChat?.type === "direct"
+    ? selectedDirectPeer?.username
+    : selectedGroup?.name;
+  const selectedChatSubtitle = selectedChat?.type === "direct"
+    ? selectedDirectPeer?.personalityType
+    : `${selectedGroup?.memberIds?.length || 0} members`;
+  const selectedChatAvatar = defaultAvatar(selectedChatName || "introvibe-chat");
+  const selectedChatOnline = selectedChat?.type === "direct" && selectedDirectPeer
+    ? isUserOnline(selectedDirectPeer)
+    : false;
+  const suggestedStarter = matchResults[0] || null;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_28%),linear-gradient(180deg,var(--color-background),color-mix(in_oklab,var(--color-background)_92%,var(--color-secondary)_8%))]">
       <Header />
       <NavigationBreadcrumb />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8">
-        <div className="flex flex-col lg:flex-row items-start justify-between gap-4 mb-6 md:mb-8">
+      <main className="mx-auto max-w-[1500px] px-4 py-6 md:px-6 md:py-8 lg:px-8">
+        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-heading font-semibold text-foreground mb-2">
-              Connect Gently
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
+              <Icon name="MessagesSquare" size={16} color="var(--color-primary)" />
+              <span>{personalityType} mode</span>
+            </div>
+            <h1 className="font-heading text-3xl font-semibold text-foreground md:text-4xl">
+              Matches & Chat
             </h1>
-            <p className="text-muted-foreground text-sm md:text-base">
-              Discover compatible peers and engage in low-pressure conversations
+            <p className="mt-3 max-w-3xl leading-relaxed text-muted-foreground">
+              IntroVibe matches you using personality type plus shared interests. Your current chat access is {personalityMeta?.chatLabel}.
             </p>
           </div>
 
-          <div className="flex items-center gap-3 w-full lg:w-auto">
-            <QuietModeIndicator />
-            <Link to="/personalized-dashboard">
-              <Button variant="outline" iconName="Home" iconPosition="left">
-                Dashboard
-              </Button>
-            </Link>
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <div className="min-w-[170px] rounded-2xl border border-border bg-card/80 px-4 py-3 shadow-gentle-sm">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Matches</p>
+                <p className="mt-1 text-2xl font-semibold text-foreground">{matchResults.length}</p>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{syncLabel}</p>
+            </div>
+            <div className="min-w-[170px] rounded-2xl border border-border bg-card/80 px-4 py-3 shadow-gentle-sm">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Inbox</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{totalThreadCount}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Messenger-style inbox with direct and group threads.</p>
+            </div>
           </div>
         </div>
 
-        {savedMessageBanner && (
-          <div className="mb-6 p-4 bg-muted/40 border border-border rounded-lg flex items-start space-x-3">
-            <Icon name="Inbox" size={18} color="var(--color-foreground)" />
-            <div className="flex-1">
-              <p className="text-sm text-foreground">{savedMessageBanner}</p>
-              {quietState?.pendingNotifications?.length > 0 && !isQuietNow && (
-                <button
-                  onClick={() => {
-                    setSavedMessageBanner(null);
-                    clearPendingNotifications();
-                  }}
-                  className="mt-2 text-primary text-sm hover:underline"
-                >
-                  Mark as seen
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="lg:hidden mb-6">
-          <div className="flex gap-2 p-1 bg-muted rounded-lg">
+        <div className="mb-4 lg:hidden">
+          <div className="flex gap-2 rounded-full border border-border bg-card/80 p-1 shadow-gentle-sm">
             <button
-              onClick={() => setActiveTab('discover')}
-              className={`
-                flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg
-                transition-gentle font-body font-medium
-                ${activeTab === 'discover' ? 'bg-primary text-primary-foreground shadow-gentle-sm' : 'text-foreground hover:bg-background'}
-              `}
+              onClick={() => setActiveTab("matches")}
+              className={`flex-1 rounded-full px-4 py-2.5 font-medium transition-gentle ${
+                activeTab === "matches"
+                  ? "bg-primary text-primary-foreground shadow-gentle-sm"
+                  : "text-foreground hover:bg-background"
+              }`}
             >
-              <Icon
-                name="Users"
-                size={18}
-                color={activeTab === 'discover' ? 'var(--color-primary-foreground)' : 'currentColor'} />
-              <span>Discover</span>
+              Matches
             </button>
             <button
-              onClick={() => setActiveTab('messages')}
-              className={`
-                flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg
-                transition-gentle font-body font-medium relative
-                ${activeTab === 'messages' ? 'bg-primary text-primary-foreground shadow-gentle-sm' : 'text-foreground hover:bg-background'}
-              `}
+              onClick={() => setActiveTab("messages")}
+              className={`flex-1 rounded-full px-4 py-2.5 font-medium transition-gentle ${
+                activeTab === "messages"
+                  ? "bg-primary text-primary-foreground shadow-gentle-sm"
+                  : "text-foreground hover:bg-background"
+              }`}
             >
-              <Icon
-                name="MessageCircle"
-                size={18}
-                color={activeTab === 'messages' ? 'var(--color-primary-foreground)' : 'currentColor'} />
-              <span>Messages</span>
-              {conversationThreads?.reduce((sum, conv) => sum + (conv?.unreadCount || 0), 0) > 0 &&
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-accent text-white rounded-full flex items-center justify-center text-xs font-medium">
-                  {conversationThreads?.reduce((sum, conv) => sum + (conv?.unreadCount || 0), 0)}
-                </span>
-              }
+              Chats
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-8">
-          <div className={`lg:col-span-5 ${activeTab === 'messages' ? 'hidden lg:block' : ''}`}>
-            <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl md:text-2xl font-heading font-semibold text-foreground">
-              Discover Matches
-            </h2>
-            <div className="flex items-center gap-3">
-              <Button variant="default" iconName="Search" onClick={handleFindMatches}>
-                Find Matches
-              </Button>
-              <FilterPanel
-                onApplyFilters={(filters) => setAppliedFilters(filters)}
-                onReset={() => setAppliedFilters(createDefaultMatchFilters())}
-              />
-            </div>
-          </div>
-
-            <div className="space-y-6">
-              {filteredMatchResults?.length > 0 ? (
-                filteredMatchResults.map((match) => (
-                  <MatchCard
-                    key={match?.id}
-                    match={{
-                      ...match,
-                      avatar: defaultAvatar(match?.username),
-                      avatarAlt: `${match?.username} avatar`,
-                      major: 'Student',
-                      year: 'Member',
-                      isOnline: isUserOnline(match),
-                      bio: 'Introvert-friendly peer ready for calm conversations.',
-                    }}
-                    onSendHello={handleSendHello}
-                    onSaveLater={handleSaveLater}
-                  />
-                ))
-              ) : hasSearched ? (
-                hasActiveFilters && matchResults.length > 0 ? (
-                  <div className="p-4 rounded-lg border border-border bg-muted/30 text-sm text-muted-foreground">
-                    <p>No matches fit your current filters.</p>
-                    <p className="mt-2">Adjust your filter selection and try again.</p>
-                  </div>
-                ) : (
-                  <EmptyState
-                    type="noMatches"
-                    onAction={() => {
-                      setHasSearched(false);
-                      setMatchResults([]);
-                    }}
-                  />
-                )
-              ) : (
-                <div className="p-4 rounded-lg border border-border bg-muted/30 text-sm text-muted-foreground">
-                  Press "Find Matches" to see peers sharing both your interests and personality tags.
+        <div className="overflow-hidden rounded-[2rem] border border-border/70 bg-card/95 shadow-[0_28px_80px_rgba(15,23,42,0.12)] backdrop-blur">
+          <div className="grid min-h-[76vh] grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className={`${activeTab === "messages" ? "hidden xl:block" : "block"} order-2 border-t border-border bg-background/80 px-5 py-5 xl:border-l xl:border-t-0`}>
+            <div className="space-y-5">
+            {groupChatEnabled && (
+              <div className="rounded-[1.75rem] border border-border bg-card/80 p-4 shadow-gentle-sm">
+                <div className="flex items-center gap-2 mb-4">
+                  <Icon name="UsersRound" size={18} color="var(--color-accent)" />
+                  <h2 className="text-lg font-heading font-semibold text-foreground">
+                    Create group chat
+                  </h2>
                 </div>
-              )}
-            </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Pick at least two matches to open a shared thread.
+                </p>
 
-            <div className="mt-6 p-4 bg-accent/5 rounded-lg border border-accent/20">
-              <div className="flex items-start space-x-3">
-                <Icon name="Info" size={20} color="var(--color-accent)" className="flex-shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="font-body font-medium text-foreground mb-1">
-                    Matching Tips
-                  </h3>
-                  <p className="caption text-muted-foreground leading-relaxed">
-                    Create or log into another account to see it appear here. We only show matches that share at least one interest and one personality tag with you.
-                  </p>
+                <input
+                  type="text"
+                  value={groupName}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="Group name"
+                  className="mb-4 flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm text-foreground"
+                />
+
+                <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                  {availableGroupMembers.length > 0 ? (
+                    availableGroupMembers.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => toggleGroupMember(member.id)}
+                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 transition-gentle ${
+                          selectedGroupMembers.includes(member.id)
+                            ? "border-primary/40 bg-primary/5"
+                            : "border-border bg-background hover:border-primary/30"
+                        }`}
+                      >
+                        <div className="text-left">
+                          <p className="font-medium text-foreground">{member.name}</p>
+                          <p className="text-sm text-muted-foreground">{member.personalityType}</p>
+                        </div>
+                        <Icon
+                          name={selectedGroupMembers.includes(member.id) ? "CheckCircle" : "Circle"}
+                          size={18}
+                          color={selectedGroupMembers.includes(member.id) ? "var(--color-primary)" : "var(--color-muted-foreground)"}
+                        />
+                      </button>
+                    ))
+                  ) : (
+                    <p className="rounded-2xl border border-dashed border-border bg-background/70 p-4 text-sm text-muted-foreground">
+                      No eligible members yet. Matching works best after more users complete their personality test.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <Button variant="default" iconName="UsersRound" onClick={handleCreateGroup} disabled={isLoadingChats} className="w-full rounded-full">
+                    Create group
+                  </Button>
                 </div>
               </div>
-            </div>
-          </div>
+            )}
 
-          <div className={`lg:col-span-7 ${activeTab === 'discover' ? 'hidden lg:block' : ''}`}>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl md:text-2xl font-heading font-semibold text-foreground">
-              Conversations
-            </h2>
-            <div className="flex items-center gap-2">
-              <Button
-                variant={showArchived ? 'outline' : 'default'}
-                size="sm"
-                onClick={() => setShowArchived(false)}
-              >
-                Active
-              </Button>
-              <Button
-                variant={showArchived ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setShowArchived(true);
-                  setSelectedPeerId(null);
-                }}
-              >
-                Archived
-              </Button>
-            </div>
-          </div>
+            <div className="rounded-[1.75rem] border border-border bg-card/80 p-4 shadow-gentle-sm">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                <Icon name="Users" size={18} color="var(--color-primary)" />
+                  <h2 className="text-lg font-heading font-semibold text-foreground">
+                    People you may vibe with
+                  </h2>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  iconName="RefreshCw"
+                  onClick={handleRefreshMatches}
+                  loading={isRefreshingUsers || isLoadingMatches}
+                  disabled={!authReady}
+                  className="rounded-full"
+                >
+                  Refresh
+                </Button>
+              </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-              <div className="lg:col-span-2 space-y-3">
-                {conversationThreads
-                  ?.filter((c) => (showArchived ? c.status === 'archived' : c.status !== 'archived'))
-                  ?.length > 0 ? (
-                  conversationThreads
-                    ?.filter((c) => (showArchived ? c.status === 'archived' : c.status !== 'archived'))
-                    ?.map((conversation) => (
-                      <ConversationThread
-                        key={conversation?.id}
-                        conversation={conversation}
-                        onSelect={handleSelectConversation}
-                        isActive={selectedPeerId === conversation?.id}
-                      />
-                    ))
+              <div className="space-y-4">
+                {isLoadingMatches ? (
+                  <div className="rounded-2xl border border-border bg-background/70 p-5">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Checking for compatible matches...
+                    </p>
+                  </div>
+                ) : matchResults.length > 0 ? (
+                  matchResults.map((match) => (
+                    <MatchCard
+                      key={match.id}
+                      match={match}
+                      onSendHello={handleStartDirectChat}
+                      onSaveLater={() => setStatusMessage(`Saved ${match.name}'s profile.`)}
+                    />
+                  ))
                 ) : (
-                  <EmptyState
-                    type="noConversations"
-                    onAction={() => setActiveTab('discover')}
-                  />
+                  <EmptyState type="noMatches" onAction={handleRefreshMatches} />
+                )}
+              </div>
+            </div>
+            </div>
+          </section>
+
+          <section className={`${activeTab === "matches" ? "hidden xl:block" : "block"} order-1 xl:min-h-[76vh]`}>
+            <div className="grid h-full grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <div className="border-b border-border bg-muted/25 p-5 xl:border-b-0 xl:border-r">
+                <div className="mb-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Inbox</p>
+                      <h2 className="mt-1 text-2xl font-heading font-semibold text-foreground">Chats</h2>
+                    </div>
+                    <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                      {totalThreadCount}
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    1-on-1 for all. Group chat is {groupChatEnabled ? "enabled" : "disabled"} for your profile.
+                  </p>
+                </div>
+
+                {isLoadingChats ? (
+                  <div className="rounded-2xl border border-border bg-background/70 p-4">
+                    <p className="text-sm text-muted-foreground">Loading your chat history...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {directThreads.length > 0 ? (
+                      directThreads.map((thread) => (
+                        <ConversationThread
+                          key={`direct-${thread.id}`}
+                          conversation={thread}
+                          onSelect={handleSelectDirectThread}
+                          isActive={selectedChat?.type === "direct" && selectedChat?.id === thread.id}
+                        />
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
+                        <p className="text-sm font-medium text-foreground">No conversations yet</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Start with a match and your inbox will appear here.
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          iconName="Search"
+                          className="mt-3 rounded-full"
+                          onClick={handleFindMatchesAction}
+                        >
+                          Find matches
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {groupChatEnabled && (
+                  <div className="mt-5 pt-5 border-t border-border">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Icon name="UsersRound" size={16} color="var(--color-accent)" />
+                      <p className="font-medium text-foreground">Groups</p>
+                    </div>
+                    <div className="space-y-2">
+                      {groupThreads.length > 0 ? (
+                        groupThreads.map((thread) => (
+                          <ConversationThread
+                            key={`group-${thread.id}`}
+                            conversation={thread}
+                            onSelect={handleSelectGroupThread}
+                            isActive={selectedChat?.type === "group" && selectedChat?.id === thread.id}
+                          />
+                        ))
+                      ) : (
+                        <p className="rounded-2xl border border-dashed border-border bg-background/80 p-4 text-sm text-muted-foreground">
+                          No group chats yet. Create one from your matches.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
 
-              <div className="lg:col-span-3">
-                {selectedPeerId ?
-                  <div className="space-y-6">
-                    <div className="bg-card rounded-xl border border-border p-4 md:p-6">
-                      <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-12 h-12 rounded-full overflow-hidden">
-                            <img
-                              src={selectedConversationData ? defaultAvatar(selectedConversationData?.username) : defaultAvatar('peer')}
-                              alt={`${selectedConversationData?.username} avatar`}
-                              className="w-full h-full object-cover" />
+              <div className="flex min-h-[40rem] flex-col bg-[linear-gradient(180deg,rgba(255,255,255,0.76),rgba(248,250,252,0.96))]">
+                {statusMessage && (
+                  <div className="border-b border-border bg-primary/5 px-5 py-3">
+                    <p className="text-sm text-foreground">{statusMessage}</p>
+                  </div>
+                )}
 
-                          </div>
-                          <div>
-                            <h3 className="font-body font-semibold text-foreground">
-                              {selectedConversationData?.username}
-                            </h3>
-                            <p className="caption text-muted-foreground">
-                              {selectedConversationStatus}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {selectedConversationStatus === 'archived' ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              iconName="RefreshCw"
-                              onClick={() => setConversationStatus(selectedPeerId, 'active')}
-                              title="Unarchive"
-                            />
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              iconName="Archive"
-                              onClick={() => setConversationStatus(selectedPeerId, 'archived')}
-                              title="Archive"
-                            />
+                {selectedChat ? (
+                  <>
+                    <div className="flex items-center justify-between gap-4 border-b border-border bg-card/90 px-5 py-4 backdrop-blur">
+                      <div className="min-w-0 flex items-center gap-3">
+                        <div className="relative flex-shrink-0">
+                          <img
+                            src={selectedChatAvatar}
+                            alt={`${selectedChatName || 'Chat'} avatar`}
+                            className="h-12 w-12 rounded-full object-cover ring-1 ring-border"
+                          />
+                          {selectedChatOnline && (
+                            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card bg-success" />
                           )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            iconName={selectedConversationStatus === 'restricted' ? 'ShieldCheck' : 'ShieldOff'}
-                            onClick={() =>
-                              setConversationStatus(
-                                selectedPeerId,
-                                selectedConversationStatus === 'restricted' ? 'active' : 'restricted'
-                              )
-                            }
-                            title={selectedConversationStatus === 'restricted' ? 'Unrestrict' : 'Restrict'}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            iconName={selectedConversationStatus === 'blocked' ? 'UserCheck' : 'Ban'}
-                            onClick={() =>
-                              setConversationStatus(
-                                selectedPeerId,
-                                selectedConversationStatus === 'blocked' ? 'active' : 'blocked'
-                              )
-                            }
-                            title={selectedConversationStatus === 'blocked' ? 'Unblock' : 'Block'}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            iconName="Trash2"
-                            onClick={() => deleteConversation(selectedPeerId)}
-                            title="Delete conversation"
-                          />
                         </div>
-
+                        <div className="min-w-0">
+                          <h3 className="truncate text-lg font-semibold text-foreground">
+                            {selectedChat.type === "direct" ? selectedChatName : `# ${selectedChatName}`}
+                          </h3>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {selectedChatOnline ? 'Active now' : selectedChatSubtitle}
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
-                        {selectedMessages?.map((message) =>
-                          <MessageBubble
-                            key={message?.id}
-                            message={{
-                              ...message,
-                              avatar: selectedConversationData ? defaultAvatar(selectedConversationData?.username) : '',
-                              avatarAlt: `${selectedConversationData?.username} avatar`,
-                              isRead: (message?.readBy || []).includes(selectedPeerId),
-                            }}
-                            isOwn={message?.senderId === currentUser?.id} />
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                          {selectedChat.type === "direct" ? "Direct" : "Group"}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("matches")}
+                          className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-gentle hover:bg-muted xl:hidden"
+                        >
+                          Matches
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.06),transparent_35%),linear-gradient(180deg,rgba(248,250,252,0.8),rgba(255,255,255,0.98))] px-4 py-6 md:px-6">
+                      <div className="mx-auto max-w-3xl">
+                        {selectedMessages.length > 0 ? (
+                          selectedMessages.map((message) => {
+                            const sender =
+                              users.find((user) => user.id === message.senderId) || selectedDirectPeer;
+
+                            return (
+                              <MessageBubble
+                                key={message.id}
+                                message={{
+                                  ...message,
+                                  senderName:
+                                    selectedChat.type === "group" && message.senderId !== currentUser?.id
+                                      ? sender?.username
+                                      : null,
+                                  avatar: defaultAvatar(sender?.username || selectedGroup?.name),
+                                  avatarAlt: `${sender?.username || selectedGroup?.name} avatar`,
+                                  isRead: false,
+                                }}
+                                isOwn={message.senderId === currentUser?.id}
+                              />
+                            );
+                          })
+                        ) : (
+                          <div className="flex min-h-[20rem] items-center justify-center">
+                            <div className="max-w-md rounded-[2rem] border border-dashed border-border bg-card/80 px-6 py-8 text-center shadow-gentle-sm">
+                              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                                <Icon name="MessageCircleMore" size={24} color="var(--color-primary)" />
+                              </div>
+                              <p className="text-base font-semibold text-foreground">No messages yet</p>
+                              <p className="mt-2 text-sm text-muted-foreground">
+                                Start the conversation whenever you&apos;re ready.
+                              </p>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
 
                     <MessageComposer
-                      recipientName={selectedConversationData?.username}
+                      recipientName={
+                        selectedChat.type === "direct"
+                          ? selectedDirectPeer?.username
+                          : `# ${selectedGroup?.name}`
+                      }
                       onSend={handleSendMessage}
-                      onSaveDraft={handleSaveDraft}
-                      onReplyLater={handleReplyLater}
-                      initialMessage={composerPrefill}
-                      onInitialMessageApplied={() => setComposerPrefill('')}
-                      disabled={['blocked', 'restricted', 'archived'].includes(selectedConversationStatus)}
+                      onSaveDraft={(value) => setStatusMessage(`Draft saved (${value.length} characters).`)}
+                      onReplyLater={() => setStatusMessage("Saved for later.")}
                     />
-
-                  </div> :
-
-                  <div className="bg-card rounded-xl border border-border p-8 md:p-12">
-                    <EmptyState
-                      type="noMessages"
-                      onAction={() => setActiveTab('discover')} />
-
+                  </>
+                ) : (
+                  <div className="flex flex-1 items-center justify-center p-8 md:p-10">
+                    <div className="max-w-lg text-center">
+                      <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                        <Icon name="MessagesSquare" size={30} color="var(--color-primary)" />
+                      </div>
+                      <h2 className="text-2xl font-semibold text-foreground md:text-3xl">
+                        Your Messenger-style chat space
+                      </h2>
+                      <p className="mt-3 text-sm leading-relaxed text-muted-foreground md:text-base">
+                        Pick a conversation from the inbox, or start one from your match suggestions.
+                      </p>
+                      <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                        {suggestedStarter ? (
+                          <Button
+                            variant="default"
+                            iconName="MessageCircle"
+                            iconPosition="left"
+                            className="rounded-full"
+                            onClick={() => handleStartDirectChat(suggestedStarter.id)}
+                          >
+                            Chat with {suggestedStarter.name}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="default"
+                            iconName="Search"
+                            iconPosition="left"
+                            className="rounded-full"
+                            onClick={handleFindMatchesAction}
+                          >
+                            Find matches
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          iconName="Users"
+                          iconPosition="left"
+                          className="rounded-full"
+                          onClick={() => setActiveTab("matches")}
+                        >
+                          View suggestions
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                }
+                )}
               </div>
             </div>
+          </section>
           </div>
         </div>
       </main>
-    </div>);
-
+    </div>
+  );
 };
 
 export default FindMatchesConversations;
-

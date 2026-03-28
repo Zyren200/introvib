@@ -11,50 +11,42 @@
 
 @layer base {
   :root {
-    /* Primary Colors */
-    --color-primary: #D8A7B1; /* dusty rose */
-    --color-primary-foreground: #2E1F27; /* deep plum text */
-    
-    /* Secondary Colors */
-    --color-secondary: #C9B6A9; /* warm taupe */
-    --color-secondary-foreground: #2E1F27;
-    
-    /* Accent Colors */
-    --color-accent: #B87491; /* mauve accent */
-    --color-accent-foreground: #FDF7F5; /* light */
-    
-    /* Background Colors */
-    --color-background: #FFF8F5; /* blush off-white */
-    --color-foreground: #2E1F27; /* deep plum */
-    
-    /* Surface Colors */
-    --color-card: #F7EFEC; /* soft shell */
-    --color-card-foreground: #2E1F27;
-    
-    --color-popover: #F7EFEC;
-    --color-popover-foreground: #2E1F27;
-    
-    /* Muted Colors */
-    --color-muted: #F0E4E1; /* pale mauve */
-    --color-muted-foreground: #6C4B57; /* muted plum */
-    
-    /* Border & Input */
-    --color-border: rgba(184, 116, 145, 0.25); /* mauve-tinted */
-    --color-input: #F7EFEC;
-    --color-ring: #D8A7B1;
-    
-    /* Status Colors */
-    --color-success: #8BA89E; /* soft sage to balance rose */
-    --color-success-foreground: #123026;
-    
-    --color-warning: #E4B88F; /* warm amber */
-    --color-warning-foreground: #2E1F27;
-    
-    --color-error: #C97B83; /* deeper dusty rose-red */
-    --color-error-foreground: #2E1F27;
-    
-    --color-destructive: #C97B83;
-    --color-destructive-foreground: #2E1F27;
+    --color-primary: #2563eb;
+    --color-primary-foreground: #eff6ff;
+
+    --color-secondary: #14b8a6;
+    --color-secondary-foreground: #042f2e;
+
+    --color-accent: #f97316;
+    --color-accent-foreground: #fff7ed;
+
+    --color-background: #f8fafc;
+    --color-foreground: #0f172a;
+
+    --color-card: #ffffff;
+    --color-card-foreground: #0f172a;
+
+    --color-popover: #ffffff;
+    --color-popover-foreground: #0f172a;
+
+    --color-muted: #e2e8f0;
+    --color-muted-foreground: #64748b;
+
+    --color-border: rgba(37, 99, 235, 0.12);
+    --color-input: #ffffff;
+    --color-ring: #2563eb;
+
+    --color-success: #10b981;
+    --color-success-foreground: #ecfdf5;
+
+    --color-warning: #f59e0b;
+    --color-warning-foreground: #1f2937;
+
+    --color-error: #ef4444;
+    --color-error-foreground: #fef2f2;
+
+    --color-destructive: #ef4444;
+    --color-destructive-foreground: #fef2f2;
     
     /* Radius */
     --radius-sm: 6px;
@@ -64,50 +56,42 @@
   }
 
   .dark {
-    /* Primary Colors */
-    --color-primary: #C07C8A; /* deeper dusty rose */
-    --color-primary-foreground: #FDF7F5;
-    
-    /* Secondary Colors */
-    --color-secondary: #A88E86; /* muted cocoa */
-    --color-secondary-foreground: #FDF7F5;
-    
-    /* Accent Colors */
-    --color-accent: #9C5C78; /* plum accent */
-    --color-accent-foreground: #FDF7F5;
-    
-    /* Background Colors */
-    --color-background: #1E1418; /* deep plum night */
-    --color-foreground: rgba(255, 240, 243, 0.9); /* soft blush light */
-    
-    /* Surface Colors */
-    --color-card: #271920; /* elevated plum */
-    --color-card-foreground: rgba(255, 240, 243, 0.9);
-    
-    --color-popover: #2F1F27;
-    --color-popover-foreground: rgba(255, 240, 243, 0.9);
-    
-    /* Muted Colors */
-    --color-muted: #2C1D24;
-    --color-muted-foreground: rgba(221, 185, 194, 0.75);
-    
-    /* Border & Input */
-    --color-border: rgba(192, 124, 138, 0.3);
-    --color-input: #2C1D24;
-    --color-ring: #C07C8A;
-    
-    /* Status Colors */
-    --color-success: #77A18F; /* sage for contrast */
-    --color-success-foreground: #0E1B15;
-    
-    --color-warning: #D7A46E;
-    --color-warning-foreground: #1E1418;
-    
-    --color-error: #B65F6C;
-    --color-error-foreground: #FDF7F5;
-    
-    --color-destructive: #B65F6C;
-    --color-destructive-foreground: #FDF7F5;
+    --color-primary: #60a5fa;
+    --color-primary-foreground: #08111f;
+
+    --color-secondary: #2dd4bf;
+    --color-secondary-foreground: #052624;
+
+    --color-accent: #fb923c;
+    --color-accent-foreground: #1c1005;
+
+    --color-background: #0f172a;
+    --color-foreground: rgba(248, 250, 252, 0.92);
+
+    --color-card: #111c31;
+    --color-card-foreground: rgba(248, 250, 252, 0.92);
+
+    --color-popover: #111c31;
+    --color-popover-foreground: rgba(248, 250, 252, 0.92);
+
+    --color-muted: #1e293b;
+    --color-muted-foreground: rgba(148, 163, 184, 0.92);
+
+    --color-border: rgba(96, 165, 250, 0.2);
+    --color-input: #172033;
+    --color-ring: #60a5fa;
+
+    --color-success: #34d399;
+    --color-success-foreground: #052e22;
+
+    --color-warning: #fbbf24;
+    --color-warning-foreground: #271804;
+
+    --color-error: #f87171;
+    --color-error-foreground: #2a1012;
+
+    --color-destructive: #f87171;
+    --color-destructive-foreground: #2a1012;
   }
 
   * {

@@ -5,18 +5,18 @@ const TrustSignals = () => {
   const trustFeatures = [
     {
       icon: 'Shield',
-      label: 'SSL Secured',
-      description: 'Your data is encrypted'
+      label: 'Simple Onboarding',
+      description: 'Register, answer 5 questions, then jump in.'
     },
     {
       icon: 'Lock',
-      label: 'Privacy Protected',
-      description: 'We never share your information'
+      label: 'Personality Aware',
+      description: 'Matching and tips adapt to your result.'
     },
     {
-      icon: 'Eye',
-      label: 'Safe Space',
-      description: 'Respectful community guidelines'
+      icon: 'MessageCircle',
+      label: 'Chat Rules',
+      description: '1-on-1 for introverts, groups for ambiverts and extroverts.'
     }
   ];
 

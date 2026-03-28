@@ -1,88 +1,163 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useIntroVibeAuth } from '../introVibeAuth';
+import {
+  getStoredSessionToken,
+  isApiOnlyMode,
+  isApiUnavailableError,
+  isRemoteAuthEnabled,
+  requestIntroVibeApi,
+} from '../lib/introVibeApi';
+import {
+  DEFAULT_QUIET_STATE,
+  DEFAULT_STATS,
+  loadLegacyQuietState,
+  loadLegacyStats,
+  normalizeQuietState,
+  normalizeStats,
+  persistLegacyQuietState,
+  persistLegacyStats,
+} from '../lib/introVibeAppState';
 
-/**
- * Lightweight app-wide state to coordinate quiet mode, pending notifications,
- * and session limits without pulling in a full state manager.
- */
 const AppStateContext = createContext(null);
 
-const STATS_KEY = 'isfEaseStats';
-
-const loadStats = () => {
-  try {
-    const saved = localStorage.getItem(STATS_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch (error) {
-    console.error('Failed to load stats', error);
-  }
-  return {
-    learningMinutes: 0,
-    quietSessions: 0,
-    reflections: 0,
-  };
-};
-
-const persistStats = (stats) => {
-  try {
-    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
-  } catch (error) {
-    console.error('Failed to persist stats', error);
-  }
-};
-
-const loadPersistedQuietState = () => {
-  try {
-    const saved = localStorage.getItem('isfEaseQuietState');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        ...parsed,
-        // Guard against stale timestamps
-        until: parsed?.until ? new Date(parsed.until).getTime() : null,
-      };
-    }
-  } catch (error) {
-    console.error('Failed to load quiet state', error);
-  }
-  return {
-    enabled: false,
-    until: null,
-    pendingNotifications: [],
-    lastReminderAt: null,
-  };
-};
-
-const persistQuietState = (state) => {
-  try {
-    localStorage.setItem('isfEaseQuietState', JSON.stringify(state));
-  } catch (error) {
-    console.error('Failed to persist quiet state', error);
-  }
-};
+const createSnapshot = (stats, quietState) =>
+  JSON.stringify({
+    stats: normalizeStats(stats),
+    quietState: normalizeQuietState(quietState),
+  });
 
 export const AppStateProvider = ({ children }) => {
-  const [quietState, setQuietState] = useState(loadPersistedQuietState);
-  const [stats, setStats] = useState(loadStats);
+  const { currentUser, authMode, authReady } = useIntroVibeAuth();
+  const [quietState, setQuietState] = useState(loadLegacyQuietState);
+  const [stats, setStats] = useState(loadLegacyStats);
+  const [storageMode, setStorageMode] = useState('legacy-local');
+  const [syncError, setSyncError] = useState(null);
+  const lastRemoteSnapshotRef = useRef(createSnapshot(DEFAULT_STATS, DEFAULT_QUIET_STATE));
 
-  // Global 30‑minute cap (validation) used by timers across pages
   const sessionLimitMinutes = 30;
-  const sessionWarningOffsetMinutes = 5; // warn at 25 minutes
+  const sessionWarningOffsetMinutes = 5;
 
   const isQuietNow = useMemo(() => {
     if (!quietState?.enabled) return false;
-    if (!quietState?.until) return true; // manual quiet mode with no expiry
+    if (!quietState?.until) return true;
     return Date.now() < quietState.until;
   }, [quietState]);
 
-  useEffect(() => {
-    persistQuietState(quietState);
-  }, [quietState]);
+  const shouldUseRemoteState = Boolean(currentUser?.id) && (
+    authMode === 'railway-api' || (isRemoteAuthEnabled() && getStoredSessionToken())
+  );
 
   useEffect(() => {
-    persistStats(stats);
-  }, [stats]);
+    if (!authReady) return undefined;
 
-  // Auto-disable quiet mode when the scheduled window ends and keep messages pending
+    if (!currentUser?.id) {
+      if (isApiOnlyMode()) {
+        setStats({ ...DEFAULT_STATS });
+        setQuietState({ ...DEFAULT_QUIET_STATE });
+        setStorageMode('railway-api');
+      } else {
+        setStats(loadLegacyStats());
+        setQuietState(loadLegacyQuietState());
+        setStorageMode('legacy-local');
+      }
+      setSyncError(null);
+      return undefined;
+    }
+
+    if (!shouldUseRemoteState) {
+      setStats(loadLegacyStats());
+      setQuietState(loadLegacyQuietState());
+      setStorageMode('legacy-local');
+      setSyncError(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const hydrateRemoteState = async () => {
+      try {
+        const payload = await requestIntroVibeApi('/api/app-state');
+        if (cancelled) return;
+
+        const nextStats = normalizeStats(payload?.stats || DEFAULT_STATS);
+        const nextQuietState = normalizeQuietState(payload?.quietState || DEFAULT_QUIET_STATE);
+        lastRemoteSnapshotRef.current = createSnapshot(nextStats, nextQuietState);
+        setStats(nextStats);
+        setQuietState(nextQuietState);
+        setStorageMode('railway-api');
+        setSyncError(null);
+      } catch (error) {
+        if (cancelled) return;
+
+        if (isRemoteAuthEnabled() && !isApiOnlyMode() && isApiUnavailableError(error)) {
+          setStats(loadLegacyStats());
+          setQuietState(loadLegacyQuietState());
+          setStorageMode('legacy-local');
+          setSyncError(null);
+          return;
+        }
+
+        setStorageMode('railway-api');
+        setSyncError(error.message);
+      }
+    };
+
+    hydrateRemoteState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, authMode, currentUser?.id, shouldUseRemoteState]);
+
+  useEffect(() => {
+    if (storageMode !== 'legacy-local') return;
+    persistLegacyQuietState(quietState);
+  }, [quietState, storageMode]);
+
+  useEffect(() => {
+    if (storageMode !== 'legacy-local') return;
+    persistLegacyStats(stats);
+  }, [stats, storageMode]);
+
+  const remoteSnapshot = useMemo(() => createSnapshot(stats, quietState), [stats, quietState]);
+
+  useEffect(() => {
+    if (storageMode !== 'railway-api' || !authReady || !currentUser?.id) return undefined;
+    if (lastRemoteSnapshotRef.current === remoteSnapshot) return undefined;
+
+    const timer = setTimeout(async () => {
+      try {
+        const payload = await requestIntroVibeApi('/api/app-state', {
+          method: 'PUT',
+          body: remoteSnapshot,
+        });
+
+        const nextStats = normalizeStats(payload?.stats || stats);
+        const nextQuietState = normalizeQuietState(payload?.quietState || quietState);
+        const nextSnapshot = createSnapshot(nextStats, nextQuietState);
+        lastRemoteSnapshotRef.current = nextSnapshot;
+        setSyncError(null);
+
+        if (nextSnapshot !== remoteSnapshot) {
+          setStats(nextStats);
+          setQuietState(nextQuietState);
+        }
+      } catch (error) {
+        if (isRemoteAuthEnabled() && !isApiOnlyMode() && isApiUnavailableError(error)) {
+          setStorageMode('legacy-local');
+          persistLegacyStats(stats);
+          persistLegacyQuietState(quietState);
+          setSyncError(null);
+          return;
+        }
+
+        setSyncError(error.message);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [authReady, currentUser?.id, quietState, remoteSnapshot, stats, storageMode]);
+
   useEffect(() => {
     if (!quietState?.enabled || !quietState?.until) return undefined;
 
@@ -134,7 +209,13 @@ export const AppStateProvider = ({ children }) => {
   const queueNotification = (notification) => {
     setQuietState((prev) => ({
       ...prev,
-      pendingNotifications: [...(prev?.pendingNotifications || []), { id: crypto.randomUUID(), ...notification }],
+      pendingNotifications: [
+        ...(prev?.pendingNotifications || []),
+        {
+          id: crypto.randomUUID(),
+          ...notification,
+        },
+      ],
     }));
   };
 
@@ -149,7 +230,7 @@ export const AppStateProvider = ({ children }) => {
   const logSessionMinutes = (minutes) => {
     setStats((prev) => ({
       ...prev,
-      learningMinutes: prev.learningMinutes + minutes,
+      learningMinutes: prev.learningMinutes + Number(minutes || 0),
     }));
   };
 
@@ -166,6 +247,8 @@ export const AppStateProvider = ({ children }) => {
     quietState,
     stats,
     isQuietNow,
+    storageMode,
+    syncError,
     enableQuietMode,
     disableQuietMode,
     queueNotification,

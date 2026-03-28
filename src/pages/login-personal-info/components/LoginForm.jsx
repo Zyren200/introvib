@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import Input from '../../../components/ui/Input';
 import Button from '../../../components/ui/Button';
 import Icon from '../../../components/AppIcon';
-import { useAuth } from '../../../context/AuthContext';
+import { useIntroVibeAuth } from '../../../introVibeAuth';
+import { getPostAuthRoute } from '../../../utils/introVibe';
 
 const LoginForm = ({ onSwitchToSignup }) => {
   const navigate = useNavigate();
-  const { login, error: authError } = useAuth();
+  const { login, error: authError } = useIntroVibeAuth();
   const [formData, setFormData] = useState({
     username: '',
     password: ''
@@ -16,14 +17,15 @@ const LoginForm = ({ onSwitchToSignup }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleChange = (e) => {
-    const { name, value } = e?.target;
-    setFormData(prev => ({
+  const handleChange = (event) => {
+    const { name, value } = event?.target;
+    setFormData((prev) => ({
       ...prev,
       [name]: value
     }));
+
     if (errors?.[name]) {
-      setErrors(prev => ({
+      setErrors((prev) => ({
         ...prev,
         [name]: ''
       }));
@@ -31,22 +33,22 @@ const LoginForm = ({ onSwitchToSignup }) => {
   };
 
   const validateForm = () => {
-    const newErrors = {};
+    const nextErrors = {};
 
     if (!formData?.username?.trim()) {
-      newErrors.username = 'Username is required';
+      nextErrors.username = 'Username is required';
     }
 
     if (!formData?.password) {
-      newErrors.password = 'Password is required';
+      nextErrors.password = 'Password is required';
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors)?.length === 0;
+    setErrors(nextErrors);
+    return Object.keys(nextErrors)?.length === 0;
   };
 
-  const handleSubmit = (e) => {
-    e?.preventDefault();
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
 
     if (!validateForm()) {
       return;
@@ -54,21 +56,20 @@ const LoginForm = ({ onSwitchToSignup }) => {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      const result = login({
-        username: formData?.username,
-        password: formData?.password
-      });
+    const result = await login({
+      username: formData?.username,
+      password: formData?.password
+    });
 
-      if (result?.success) {
-        navigate('/personalized-dashboard');
-      } else {
-        setErrors({
-          general: result?.error || authError || 'Invalid credentials.'
-        });
-        setIsLoading(false);
-      }
-    }, 1000);
+    if (result?.success) {
+      navigate(getPostAuthRoute(result?.user));
+      return;
+    }
+
+    setErrors({
+      general: result?.error || authError || 'Invalid credentials.'
+    });
+    setIsLoading(false);
   };
 
   return (
@@ -79,6 +80,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
           <p className="text-sm text-error flex-1">{errors?.general}</p>
         </div>
       )}
+
       <Input
         label="Username"
         type="text"
@@ -90,6 +92,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
         required
         disabled={isLoading}
       />
+
       <div className="relative">
         <Input
           label="Password"
@@ -104,7 +107,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
         />
         <button
           type="button"
-          onClick={() => setShowPassword(!showPassword)}
+          onClick={() => setShowPassword((prev) => !prev)}
           className="absolute right-3 top-9 p-2 rounded-lg hover:bg-muted transition-gentle"
           aria-label={showPassword ? 'Hide password' : 'Show password'}
         >
@@ -115,14 +118,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
           />
         </button>
       </div>
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          className="text-sm text-primary hover:text-primary/80 transition-gentle caption"
-        >
-          Forgot Password?
-        </button>
-      </div>
+
       <Button
         type="submit"
         variant="default"
@@ -131,7 +127,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
         iconName="LogIn"
         iconPosition="right"
       >
-        Enter Your Space
+        Log in to IntroVibe
       </Button>
 
       <div className="text-center">
@@ -141,7 +137,7 @@ const LoginForm = ({ onSwitchToSignup }) => {
           disabled={isLoading}
           className="text-sm text-primary hover:text-primary/80 transition-gentle caption"
         >
-          Don't have an account? Create one
+          Don&apos;t have an account? Create one
         </button>
       </div>
     </form>

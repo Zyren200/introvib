@@ -12,9 +12,9 @@ const MessageBubble = ({ message, isOwn }) => {
   };
 
   return (
-    <div className={`flex items-start space-x-3 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''} mb-4 md:mb-6`}>
+    <div className={`mb-4 flex items-end gap-3 ${isOwn ? 'flex-row-reverse' : ''}`}>
       {!isOwn && (
-        <div className="w-8 h-8 md:w-10 md:h-10 rounded-full overflow-hidden flex-shrink-0">
+        <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-border">
           <Image
             src={message?.avatar}
             alt={message?.avatarAlt}
@@ -22,19 +22,25 @@ const MessageBubble = ({ message, isOwn }) => {
           />
         </div>
       )}
-      <div className={`flex-1 max-w-[85%] md:max-w-[75%] ${isOwn ? 'flex flex-col items-end' : ''}`}>
-        <div className={`
-          p-3 md:p-4 rounded-2xl
-          ${isOwn 
-            ? 'bg-primary text-primary-foreground rounded-tr-sm' 
-            : 'bg-card border border-border rounded-tl-sm'
-          }
-        `}>
+      <div className={`max-w-[86%] md:max-w-[72%] ${isOwn ? 'ml-auto flex flex-col items-end' : ''}`}>
+        <div
+          className={`rounded-[1.45rem] px-4 py-3 shadow-sm ${
+            isOwn
+              ? 'bg-primary text-primary-foreground rounded-br-md'
+              : 'border border-border/80 bg-background rounded-bl-md text-foreground'
+          }`}
+        >
+          {message?.senderName && !isOwn && (
+            <p className="mb-2 text-xs font-semibold text-primary">
+              {message?.senderName}
+            </p>
+          )}
           {message?.isPromptUsed && (
-            <div className={`
-              flex items-center space-x-2 mb-2 pb-2 border-b
-              ${isOwn ? 'border-primary-foreground/20' : 'border-border'}
-            `}>
+            <div
+              className={`mb-2 flex items-center space-x-2 border-b pb-2 ${
+                isOwn ? 'border-primary-foreground/20' : 'border-border'
+              }`}
+            >
               <Icon 
                 name="Lightbulb" 
                 size={14} 
@@ -47,10 +53,7 @@ const MessageBubble = ({ message, isOwn }) => {
           )}
 
           {message?.content && (
-            <p className={`
-              text-sm md:text-base leading-relaxed
-              ${isOwn ? 'text-primary-foreground' : 'text-foreground'}
-            `}>
+            <p className={`text-sm leading-relaxed md:text-[15px] ${isOwn ? 'text-primary-foreground' : 'text-foreground'}`}>
               {message?.content}
             </p>
           )}
@@ -59,20 +62,20 @@ const MessageBubble = ({ message, isOwn }) => {
               <img
                 src={message?.imageData}
                 alt="Shared attachment"
-                className="max-h-64 rounded-lg border border-border object-cover"
+                className="max-h-64 rounded-2xl border border-border object-cover"
               />
             </div>
           )}
         </div>
 
-        <div className={`flex items-center space-x-2 mt-1.5 ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
-          <span className="caption text-muted-foreground">
+        <div className={`mt-1.5 flex items-center gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
+          <span className="text-xs text-muted-foreground">
             {formatTime(message?.timestamp)}
           </span>
           {isOwn && message?.isRead && (
             <div className="flex items-center space-x-1">
               <Icon name="CheckCheck" size={14} color="var(--color-success)" />
-              <span className="caption text-success">Read</span>
+              <span className="text-xs text-success">Read</span>
             </div>
           )}
         </div>

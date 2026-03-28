@@ -1,0 +1,23 @@
+import {
+  getStoredSessionToken,
+  isApiOnlyMode,
+  isApiUnavailableError,
+  isRemoteAuthEnabled,
+  requestIntroVibeApi,
+} from "./introVibeApi";
+
+export const shouldUseRemoteMatches = (authMode, currentUserId) =>
+  Boolean(currentUserId) &&
+  (authMode === "railway-api" || (isRemoteAuthEnabled() && getStoredSessionToken()));
+
+export const shouldFallbackToLegacyMatches = (error) =>
+  isRemoteAuthEnabled() && !isApiOnlyMode() && isApiUnavailableError(error);
+
+export const fetchRemoteMatches = async () => {
+  const payload = await requestIntroVibeApi("/api/matches");
+
+  return {
+    matches: Array.isArray(payload?.matches) ? payload.matches : [],
+    generatedAt: payload?.generatedAt || Date.now(),
+  };
+};

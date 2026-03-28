@@ -3,146 +3,155 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../../components/ui/Header';
 import Icon from '../../components/AppIcon';
 import QuietModeSection from './components/QuietModeSection';
-import SessionTimerSection from './components/SessionTimerSection';
 import NotificationSection from './components/NotificationSection';
 import AccountSecuritySection from './components/AccountSecuritySection';
 import AppearanceSection from './components/AppearanceSection';
 import Button from '../../components/ui/Button';
 import { useAppState } from '../../context/AppStateContext';
-import { useAuth } from '../../context/AuthContext';
-
-const USER_SETTINGS_KEY = 'userSettings';
-const THEME_MODE_KEY = 'isf-theme-mode';
-
-const applyThemeMode = (mode) => {
-  const root = document?.documentElement;
-  if (!root) return;
-  root.classList.toggle('dark', mode === 'dark');
-};
-
-const defaultSettings = {
-  appearance: {
-    theme: 'light'
-  },
-  quietMode: {
-    enabled: false,
-    startTime: '22:00',
-    endTime: '07:00',
-    daysOfWeek: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
-  },
-  sessionTimer: {
-    duration: 30,
-    breakReminder: true,
-    breakDuration: 5,
-    autoStart: false,
-    soundEnabled: true
-  },
-  notifications: {
-    messageAlerts: true,
-    matchSuggestions: true,
-    systemUpdates: false,
-    emailNotifications: false,
-    quietHoursRespect: true
-  },
-  account: {
-    email: '',
-    twoFactorEnabled: false,
-    dataExportRequested: false
-  }
-};
+import { useIntroVibeAuth } from '../../introVibeAuth';
+import {
+  DEFAULT_SETTINGS,
+  applyThemeMode,
+  fetchRemoteSettings,
+  loadLegacySettings,
+  mergeSettings,
+  persistLegacySettings,
+  saveRemoteSettings,
+  shouldFallbackToLegacySettings,
+  shouldUseRemoteSettings,
+} from '../../lib/introVibeSettings';
 
 const Settings = () => {
   const navigate = useNavigate();
-  const [settings, setSettings] = useState(defaultSettings);
-
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [persistedSettings, setPersistedSettings] = useState(DEFAULT_SETTINGS);
   const [hasChanges, setHasChanges] = useState(false);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
   const { enableQuietMode, disableQuietMode } = useAppState();
-  const { currentUser, deleteAccount } = useAuth();
+  const { currentUser, deleteAccount, authMode, authReady } = useIntroVibeAuth();
 
-  // Load settings from localStorage
   useEffect(() => {
-    const savedSettings = localStorage.getItem(USER_SETTINGS_KEY);
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings);
-        const merged = {
-          ...defaultSettings,
-          ...parsed,
-          appearance: { ...defaultSettings.appearance, ...(parsed?.appearance || {}) },
-          quietMode: { ...defaultSettings.quietMode, ...(parsed?.quietMode || {}) },
-          sessionTimer: { ...defaultSettings.sessionTimer, ...(parsed?.sessionTimer || {}) },
-          notifications: { ...defaultSettings.notifications, ...(parsed?.notifications || {}) },
-          account: { ...defaultSettings.account, ...(parsed?.account || {}) }
-        };
-        setSettings(merged);
-        applyThemeMode(merged?.appearance?.theme || 'light');
-      } catch (error) {
-        console.error('Failed to load settings:', error);
-      }
-    } else {
-      const storedTheme = localStorage.getItem(THEME_MODE_KEY) || 'light';
-      applyThemeMode(storedTheme);
+    if (!authReady) {
+      return undefined;
     }
-  }, []);
+
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      setIsLoadingSettings(true);
+      setSettingsError('');
+
+      if (shouldUseRemoteSettings(authMode, currentUser?.id)) {
+        try {
+          const remoteSettings = await fetchRemoteSettings();
+          if (cancelled) return;
+
+          setSettings(remoteSettings);
+          setPersistedSettings(remoteSettings);
+          applyThemeMode(remoteSettings?.appearance?.theme || 'light');
+          setHasChanges(false);
+          setIsLoadingSettings(false);
+          return;
+        } catch (error) {
+          if (!shouldFallbackToLegacySettings(error)) {
+            if (!cancelled) {
+              setSettingsError(error.message);
+              setIsLoadingSettings(false);
+            }
+            return;
+          }
+        }
+      }
+
+      if (!cancelled) {
+        const legacySettings = loadLegacySettings();
+        setSettings(legacySettings);
+        setPersistedSettings(legacySettings);
+        applyThemeMode(legacySettings?.appearance?.theme || 'light');
+        setHasChanges(false);
+        setIsLoadingSettings(false);
+      }
+    };
+
+    loadSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, authReady, currentUser?.id]);
 
   const updateSettings = (section, updates) => {
-    setSettings(prev => ({
+    setSettings((prev) => ({
       ...prev,
       [section]: {
         ...prev?.[section],
-        ...updates
-      }
+        ...updates,
+      },
     }));
     setHasChanges(true);
   };
 
-  const handleSave = () => {
-    localStorage.setItem(USER_SETTINGS_KEY, JSON.stringify(settings));
-    localStorage.setItem(THEME_MODE_KEY, settings?.appearance?.theme || 'light');
-    applyThemeMode(settings?.appearance?.theme || 'light');
+  const handleSave = async () => {
+    setIsSavingSettings(true);
+    setSettingsError('');
+
+    let nextSettings = mergeSettings(settings);
+
+    if (shouldUseRemoteSettings(authMode, currentUser?.id)) {
+      try {
+        nextSettings = await saveRemoteSettings(nextSettings);
+      } catch (error) {
+        if (!shouldFallbackToLegacySettings(error)) {
+          setSettingsError(error.message || 'Unable to save settings right now.');
+          setIsSavingSettings(false);
+          return;
+        }
+
+        nextSettings = persistLegacySettings(nextSettings);
+      }
+    } else {
+      nextSettings = persistLegacySettings(nextSettings);
+    }
+
+    setSettings(nextSettings);
+    setPersistedSettings(nextSettings);
+    applyThemeMode(nextSettings?.appearance?.theme || 'light');
     window.dispatchEvent(new Event('isf-theme-updated'));
     setHasChanges(false);
     setShowSaveConfirmation(true);
     setTimeout(() => setShowSaveConfirmation(false), 3000);
 
-    // Apply quiet mode immediately when toggled on in settings for 2 hours (aligns with spec).
-    if (settings?.quietMode?.enabled) {
+    if (nextSettings?.quietMode?.enabled) {
       enableQuietMode(120);
     } else {
       disableQuietMode();
     }
+
+    setIsSavingSettings(false);
   };
 
   const handleReset = () => {
-    const savedSettings = localStorage.getItem(USER_SETTINGS_KEY);
-    if (savedSettings) {
-      const parsed = JSON.parse(savedSettings);
-      const merged = {
-        ...defaultSettings,
-        ...parsed,
-        appearance: { ...defaultSettings.appearance, ...(parsed?.appearance || {}) },
-        quietMode: { ...defaultSettings.quietMode, ...(parsed?.quietMode || {}) },
-        sessionTimer: { ...defaultSettings.sessionTimer, ...(parsed?.sessionTimer || {}) },
-        notifications: { ...defaultSettings.notifications, ...(parsed?.notifications || {}) },
-        account: { ...defaultSettings.account, ...(parsed?.account || {}) }
-      };
-      setSettings(merged);
-      applyThemeMode(merged?.appearance?.theme || 'light');
-    } else {
-      setSettings(defaultSettings);
-      applyThemeMode(defaultSettings?.appearance?.theme || 'light');
-    }
+    setSettings(persistedSettings);
+    applyThemeMode(persistedSettings?.appearance?.theme || 'light');
     setHasChanges(false);
+    setSettingsError('');
   };
 
-  const handleDeleteAccount = () => {
-    const result = deleteAccount();
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    const result = await deleteAccount();
+    setIsDeletingAccount(false);
+
     if (!result?.success) {
       return result;
     }
 
-    setSettings(defaultSettings);
+    setSettings(DEFAULT_SETTINGS);
+    setPersistedSettings(DEFAULT_SETTINGS);
     setHasChanges(false);
     setShowSaveConfirmation(false);
     navigate('/login-personal-info');
@@ -164,7 +173,7 @@ const Settings = () => {
             </h1>
           </div>
           <p className="text-muted-foreground font-body">
-            Customize your learning environment to match your preferences and comfort level
+            Customize your IntroVibe preferences, notifications, and account controls
           </p>
         </div>
 
@@ -175,36 +184,45 @@ const Settings = () => {
           </div>
         )}
 
-        <div className="space-y-6">
-          <AppearanceSection
-            settings={settings?.appearance}
-            onUpdate={(updates) => updateSettings('appearance', updates)}
-          />
+        {settingsError && (
+          <div className="mb-6 p-4 bg-error/10 border border-error/20 rounded-lg flex items-center space-x-3 transition-gentle">
+            <Icon name="AlertCircle" size={20} color="var(--color-error)" />
+            <span className="text-error font-body">{settingsError}</span>
+          </div>
+        )}
 
-          <QuietModeSection 
-            settings={settings?.quietMode}
-            onUpdate={(updates) => updateSettings('quietMode', updates)}
-          />
+        {isLoadingSettings ? (
+          <div className="bg-card rounded-xl p-8 border border-border shadow-gentle text-center">
+            <p className="text-foreground font-medium">Loading your IntroVibe settings...</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <AppearanceSection
+              settings={settings?.appearance}
+              onUpdate={(updates) => updateSettings('appearance', updates)}
+            />
 
-          <SessionTimerSection 
-            settings={settings?.sessionTimer}
-            onUpdate={(updates) => updateSettings('sessionTimer', updates)}
-          />
+            <QuietModeSection 
+              settings={settings?.quietMode}
+              onUpdate={(updates) => updateSettings('quietMode', updates)}
+            />
 
-          <NotificationSection 
-            settings={settings?.notifications}
-            onUpdate={(updates) => updateSettings('notifications', updates)}
-          />
+            <NotificationSection 
+              settings={settings?.notifications}
+              onUpdate={(updates) => updateSettings('notifications', updates)}
+            />
 
-          <AccountSecuritySection 
-            settings={settings?.account}
-            accountEmail={currentUser?.email}
-            onDeleteAccount={handleDeleteAccount}
-            onUpdate={(updates) => updateSettings('account', updates)}
-          />
-        </div>
+            <AccountSecuritySection 
+              settings={settings?.account}
+              accountEmail={currentUser?.email}
+              onDeleteAccount={handleDeleteAccount}
+              onUpdate={(updates) => updateSettings('account', updates)}
+              isDeletingAccount={isDeletingAccount}
+            />
+          </div>
+        )}
 
-        {hasChanges && (
+        {hasChanges && !isLoadingSettings && (
           <div className="sticky bottom-6 mt-8 p-4 bg-card border border-border rounded-lg shadow-gentle-lg flex items-center justify-between">
             <div className="flex items-center space-x-2 text-muted-foreground caption">
               <Icon name="AlertCircle" size={16} color="var(--color-muted-foreground)" />
@@ -214,6 +232,7 @@ const Settings = () => {
               <Button
                 variant="ghost"
                 onClick={handleReset}
+                disabled={isSavingSettings}
               >
                 Reset
               </Button>
@@ -221,6 +240,7 @@ const Settings = () => {
                 variant="default"
                 iconName="Save"
                 onClick={handleSave}
+                loading={isSavingSettings}
               >
                 Save Changes
               </Button>

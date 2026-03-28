@@ -6,8 +6,8 @@ const EmptyState = ({ type, onAction }) => {
   const states = {
     noMatches: {
       icon: 'Users',
-      title: 'No matches yet',
-      description: 'We\'re finding compatible peers for you. Check back soon for gentle suggestions based on your interests and personality.',
+      title: 'Can\'t find a match yet',
+      description: 'We can\'t find a compatible match right now. IntroVibe needs someone who shares your personality type and at least one interest.',
       actionLabel: 'Refresh matches',
       actionIcon: 'RefreshCw'
     },
