@@ -4,6 +4,22 @@ const AUTH_MODE = (import.meta.env.VITE_INTROVIBE_AUTH_MODE || "hybrid").toLower
 
 const buildApiUrl = (path) => `${API_BASE_URL}${path}`;
 
+const getApiErrorMessage = (path, status, payload) => {
+  if (payload?.error) {
+    return payload.error;
+  }
+
+  if (status === 404 && path.startsWith("/api/")) {
+    if (API_BASE_URL) {
+      return `IntroVibe API route was not found at ${API_BASE_URL}${path}. Check your Vercel deployment or VITE_API_BASE_URL.`;
+    }
+
+    return "IntroVibe API route was not found. You are likely running the Vite frontend without the Vercel API. Use VITE_INTROVIBE_AUTH_MODE=hybrid, set VITE_API_BASE_URL to your deployed Vercel URL, or run through vercel dev.";
+  }
+
+  return `Request failed with status ${status}.`;
+};
+
 export const isRemoteAuthEnabled = () => AUTH_MODE === "hybrid" || AUTH_MODE === "api";
 export const isApiOnlyMode = () => AUTH_MODE === "api";
 
@@ -75,7 +91,7 @@ export const requestIntroVibeApi = async (path, options = {}) => {
   }
 
   if (!response.ok) {
-    const apiError = new Error(data?.error || `Request failed with status ${response.status}.`);
+    const apiError = new Error(getApiErrorMessage(path, response.status, data));
     apiError.status = response.status;
     apiError.code = response.status === 404 ? "API_UNAVAILABLE" : "API_ERROR";
     apiError.payload = data;
