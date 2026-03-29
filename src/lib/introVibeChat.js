@@ -58,37 +58,39 @@ export const shouldFallbackToLegacyChat = (error) =>
 export const fetchRemoteChatState = async () => requestIntroVibeApi("/api/chat/state");
 
 export const sendRemoteDirectMessage = async (peerId, payload) =>
-  requestIntroVibeApi("/api/chat/direct/send", {
+  requestIntroVibeApi("/api/chat/direct", {
     method: "POST",
     body: JSON.stringify({
+      action: "send",
       peerId,
       ...(typeof payload === "string" ? { text: payload } : payload),
     }),
   });
 
 export const markRemoteDirectRead = async (peerId) =>
-  requestIntroVibeApi("/api/chat/direct/read", {
+  requestIntroVibeApi("/api/chat/direct", {
     method: "POST",
-    body: JSON.stringify({ peerId }),
+    body: JSON.stringify({ action: "read", peerId }),
   });
 
 export const createRemoteGroup = async (name, memberIds) =>
-  requestIntroVibeApi("/api/chat/groups/create", {
+  requestIntroVibeApi("/api/chat/groups", {
     method: "POST",
-    body: JSON.stringify({ name, memberIds }),
+    body: JSON.stringify({ action: "create", name, memberIds }),
   });
 
 export const sendRemoteGroupMessage = async (groupId, payload) =>
-  requestIntroVibeApi("/api/chat/groups/send", {
+  requestIntroVibeApi("/api/chat/groups", {
     method: "POST",
     body: JSON.stringify({
+      action: "send",
       groupId,
       ...(typeof payload === "string" ? { text: payload } : payload),
     }),
   });
 
 export const markRemoteGroupRead = async (groupId) =>
-  requestIntroVibeApi("/api/chat/groups/read", {
+  requestIntroVibeApi("/api/chat/groups", {
     method: "POST",
-    body: JSON.stringify({ groupId }),
+    body: JSON.stringify({ action: "read", groupId }),
   });
